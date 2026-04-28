@@ -39,8 +39,6 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'corsheaders',
     'rest_framework',
-    'groq_llm',
-    'ollama_llms',
     'rag',
     'recommender'
 ]
