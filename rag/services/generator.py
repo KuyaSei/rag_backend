@@ -1,4 +1,4 @@
-import ollama
+# import ollama
 
 # def ask_llm(prompt: str):
 #     response = ollama.chat(

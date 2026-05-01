@@ -17,21 +17,23 @@ def embed_doc(doc):
     emb = EMBEDDING_MODEL.encode(doc)
     return emb
 
+
+#OBSOLETE - If you look at rag/views.py, the ingestion webhooks bypass this completely and just call qd_client.upsert() directly. This function is dead weight.
 # =========================================
 # 2. Store embedded document to vector database
 # =========================================
-def ingest_patient_food_intake_doc(doc, embedded_doc):
-    # Generate a unique ID for this point
-    point_id = str(uuid.uuid4())  # UUID ensures no collision
+# def ingest_patient_food_intake_doc(doc, embedded_doc):
+#     # Generate a unique ID for this point
+#     point_id = str(uuid.uuid4())  # UUID ensures no collision
     
-    # Upload document text + embedded document
-    point = PointStruct( 
-        id=point_id, # unique ID
-        vector=embedded_doc.tolist(),  # embedding as list
-        payload={
-            "text": doc, # store equivalent text
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
-        }  
-    )
+#     # Upload document text + embedded document
+#     point = PointStruct( 
+#         id=point_id, # unique ID
+#         vector=embedded_doc.tolist(),  # embedding as list
+#         payload={
+#             "text": doc, # store equivalent text
+#             "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
+#         }  
+#     )
 
-    qd_client.upsert(collection_name=COLLECTION_NAME, points=[point])
+#     qd_client.upsert(collection_name=COLLECTION_NAME, points=[point])

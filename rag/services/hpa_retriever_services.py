@@ -181,7 +181,7 @@ def retrieve_all(query, top_k=5):
     return results[:top_k]
 
 
-
+# STANDBY - used only by the monthly recommender which is bypassed by frontend
 def retrieve_text(query, top_k=5):
     results = []
 
@@ -226,6 +226,7 @@ def build_rag_context(chunks):
 
     return "\n\n".join(context_blocks)
 
+# STANDBY - A more complex context builder that combines both the HPA and patient intake retrieval results into one prompt, with clear section headers. Used by the CombinedRAGView endpoint in rag/views.py, which is a general-purpose RAG endpoint that isn't currently tied to any specific UI component but could be used for a general "Ask the AI" feature.
 
 #==============================================
 # 5. Generation

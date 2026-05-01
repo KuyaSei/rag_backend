@@ -11,8 +11,8 @@ from rest_framework import status
 from .services.hpa_retriever_services import build_prompt, build_rag_context, qdrant_search, retrieve_all
 
 # Patient Docs RAG Services
-from .services.patient_docs_sql_ingestor import embed_doc, ingest_patient_food_intake_doc
-from .services.patient_docs_retriever import get_patient_food_intake, get_patient_segmented_intake, vector_search_patient_docs_chinese, vector_search_patient_docs_english, build_prompt_for_patient_docs, vector_search_patient_docs
+from .services.patient_docs_sql_ingestor import embed_doc
+from .services.patient_docs_retriever import get_patient_food_intake, get_patient_segmented_intake, vector_search_patient_docs_chinese, vector_search_patient_docs_english, build_prompt_for_patient_docs
 from .services.generator import ask_llm
 
 from qdrant_client.models import PointStruct
@@ -23,7 +23,7 @@ from .services.patient_docs_sql_ingestor import embed_doc, qd_client
 # AMIEL'S FOOD INTAKE BACKEND URL
 FOOD_INTAKE_BACKEND_URL = "https://h3vkhzth-8000.asse.devtunnels.ms/api/"
 
-
+# STANDBY - A generic endpoint that takes a free-text query, searches both the English patient docs and the HPA dietary guidelines, and combines them into one prompt. This is a classic "Chatbot" endpoint. It isn't currently wired to any specific UI component you've shown me, but it's a fully functional, standard RAG endpoint that might be used for a general "Ask the AI" feature.
 class CombinedRAGView(APIView):
     def post(self, request):
         query = request.data.get("query")
@@ -92,7 +92,7 @@ Dietary guidelines context:
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-
+# STANDBY - Similar to above, but exclusively searches the Taiwan HPA dietary guidelines. Not tied to the Patient Details or Analysis pages, but likely used if you have a "Guidelines Search" UI elsewhere.
 # Taiwan HPA RAG
 class HpaDocsRetrievalRagQueryView(APIView):
     def post(self, request):
@@ -128,7 +128,7 @@ class HpaDocsRetrievalRagQueryView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-
+# STANDBY - A pure chat endpoint that queries the ltc_chinese_semantic_graph collection. Not used in your current UI flow.
 # (CHINESE) Patient Docs RAG        
 class PatientDocsRagQueryView(APIView):
     def post(self, request):
@@ -191,7 +191,7 @@ class PatientDocsRagQueryView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-
+# STANDBY - Same as above, but exclusively searches the English patient docs collection. Not used in your current UI flow.
 # (ENGLISH) Patient Docs RAG
 class PatientDocsEnglishRagQueryView(APIView):
     def post(self, request):
@@ -255,7 +255,7 @@ class PatientDocsEnglishRagQueryView(APIView):
             )
 
 
-
+# OKAY - When the 5070 MySQL database updates, the signal sends a payload here. This view embeds the data and saves it into the Qdrant ltc_semantic_graph_2 collection. If you delete this, your vector database stops updating.
 # 5090 server
 class Receive5090PayloadView(APIView):
     """
@@ -301,7 +301,7 @@ class Receive5090PayloadView(APIView):
                 point_id = int(f"3000{metadata.get('ltc_patient_id')}")
 
             elif doc_type == "intake_event":
-                point_id = int(f"1000  {metadata.get('intake_id')}")
+                point_id = int(f"1000{metadata.get('intake_id')}")
 
             elif doc_type == "segmented_intake":
                 point_id = int(f"4000{metadata.get('estimation_id')}")
@@ -321,16 +321,17 @@ class Receive5090PayloadView(APIView):
             )
 
             qd_client.upsert(
-                collection_name="ltc_semantic_graph", 
+                collection_name="ltc_semantic_graph_2", 
                 points=[point]
             )
 
+            print(f"Upserted point with ID: {point_id} into ltc_semantic_graph_2 collection.")
             return Response({"status": "Successfully ingested to 5070 Qdrant", "id": point_id}, status=status.HTTP_200_OK)
 
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
+# OKAY - The exact same ingestion logic as above, but it saves the embedded data to the ltc_chinese_semantic_graph collection.
 class Receive5090PayloadChineseDocsView(APIView):
     """ CHINESE VERSION
     Webhook to catch semantic JSON payloads from the 5090, 
@@ -374,7 +375,7 @@ class Receive5090PayloadChineseDocsView(APIView):
                 point_id = int(f"3000{metadata.get('ltc_patient_id')}")
 
             elif doc_type == "intake_event":
-                point_id = int(f"1000  {metadata.get('intake_id')}")
+                point_id = int(f"1000{metadata.get('intake_id')}")
 
             elif doc_type == "segmented_intake":
                 point_id = int(f"4000{metadata.get('estimation_id')}")
@@ -407,6 +408,8 @@ class Receive5090PayloadChineseDocsView(APIView):
 # Patient Food Intake Summary
 FOOD_INTAKE_BACKEND_URL = "https://h3vkhzth-8000.asse.devtunnels.ms/api/"
 
+
+# OKAY - USED IN PATIENT DETAILS PAGE ON THE TEXTAREA FOR DAILY FOOD INTAKE RECOMMENDATION ==========
 class PatientFoodIntakeSummaryView(APIView):    
     def get(self, request, pk):
         try:
@@ -476,17 +479,7 @@ class PatientFoodIntakeSummaryView(APIView):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
+# OBSOLETE - NOT USED IN CURRENT UI FLOW, BUT RETAINED FOR FUTURE REFERENCE.
 # class RagQueryByPatientView(APIView):    
 #     def post(self, request, ltc_patient_id, model_name=None):
 #         try:
