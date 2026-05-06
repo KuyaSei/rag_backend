@@ -1,3 +1,4 @@
+import traceback
 from urllib import response
 
 from django.shortcuts import render
@@ -10,6 +11,7 @@ import requests
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from typer import prompt
 
 # HPA RAG Services
 from rag.services.hpa_retriever_services import build_prompt, build_rag_context, qdrant_search, retrieve_all, retrieve_text
@@ -360,9 +362,16 @@ class WeeklyRecommendationsByPatientView(APIView):
                 "fiber_g": get_dri_min_max(patient_dris["dri_fiber"]),
             }
 
+            # Weekly DRI = daily DRI × 7
+            weekly_dri = {
+                nutrient: {"min": round(val["min"] * 7, 2), "max": round(val["max"] * 7, 2)}
+                for nutrient, val in patient_dris.items()
+            }
+
             # Food Intakes (Last 7 days)
             # a. Current date
-            curdate = datetime.now(ZoneInfo("Asia/Taipei")).date()
+            requested_date = request.GET.get('date')
+            curdate = datetime.strptime(requested_date, "%Y-%m-%d").date() if requested_date else datetime.now(ZoneInfo("Asia/Taipei")).date()
 
             # b. Create a list of dates of the previous 7 days            
             dates_list = [
@@ -437,36 +446,22 @@ class WeeklyRecommendationsByPatientView(APIView):
                 day_data["daily_nutrition_remarks"] = nutrition_remarks
 
             
-            # 3. WEEKLY AVERAGE
-            # a. Get valid days with food intake records (to only get average of days with records)
-            valid_days = [day_data for day_data in weekly_data.values() if day_data["food_intake_docs"]]
+            # 3. WEEKLY TOTAL (sum of all 7 days; days with no intake contribute 0)
+            weekly_total_nutri_content = {
+                "calories_kcal": round(sum(day["total_nutritional_content"]["calories_kcal"] for day in weekly_data.values()), 2),
+                "protein_g": round(sum(day["total_nutritional_content"]["protein_g"] for day in weekly_data.values()), 2),
+                "fats_g": round(sum(day["total_nutritional_content"]["fats_g"] for day in weekly_data.values()), 2),
+                "carbohydrates_g": round(sum(day["total_nutritional_content"]["carbohydrates_g"] for day in weekly_data.values()), 2),
+                "fiber_g": round(sum(day["total_nutritional_content"]["fiber_g"] for day in weekly_data.values()), 2),
+            }
 
-            # b. Calculate weekly average for each nutrient based on valid days
-            if valid_days:
-                weekly_average_nutri_content = {
-                    "calories_kcal": sum(day["total_nutritional_content"]["calories_kcal"] for day in valid_days) / len(valid_days),
-                    "protein_g": sum(day["total_nutritional_content"]["protein_g"] for day in valid_days) / len(valid_days),
-                    "fats_g": sum(day["total_nutritional_content"]["fats_g"] for day in valid_days) / len(valid_days),
-                    "carbohydrates_g": sum(day["total_nutritional_content"]["carbohydrates_g"] for day in valid_days) / len(valid_days),
-                    "fiber_g": sum(day["total_nutritional_content"]["fiber_g"] for day in valid_days) / len(valid_days),
-                }
-            else:
-                # c. If no valid days (i.e., no food intake records), set weekly average to 0 or None
-                weekly_average_nutri_content = {
-                    "calories_kcal": 0,
-                    "protein_g": 0,
-                    "fats_g": 0,
-                    "carbohydrates_g": 0,
-                    "fiber_g": 0,
-                }
-
-                # d. GET NUTRITIONAL REMARKS BASED ON RECOMMENDED INTAKE AND WEEKLY AVERAGE INTAKE 
+            # Nutritional remarks: 7-day total vs weekly DRI (DRI × 7)
             weekly_nutrition_remarks = {
-                "protein_g": get_nutrition_remarks(patient_dris, weekly_average_nutri_content, nutrient = "protein_g"),
-                "fats_g": get_nutrition_remarks(patient_dris, weekly_average_nutri_content, nutrient = "fats_g"),
-                "carbohydrates_g": get_nutrition_remarks(patient_dris, weekly_average_nutri_content, nutrient = "carbohydrates_g"),
-                "fiber_g": get_nutrition_remarks(patient_dris, weekly_average_nutri_content, nutrient = "fiber_g"),
-                "calories_kcal": get_nutrition_remarks(patient_dris, weekly_average_nutri_content, nutrient = "calories_kcal"),
+                "protein_g": get_nutrition_remarks(weekly_dri, weekly_total_nutri_content, nutrient="protein_g"),
+                "fats_g": get_nutrition_remarks(weekly_dri, weekly_total_nutri_content, nutrient="fats_g"),
+                "carbohydrates_g": get_nutrition_remarks(weekly_dri, weekly_total_nutri_content, nutrient="carbohydrates_g"),
+                "fiber_g": get_nutrition_remarks(weekly_dri, weekly_total_nutri_content, nutrient="fiber_g"),
+                "calories_kcal": get_nutrition_remarks(weekly_dri, weekly_total_nutri_content, nutrient="calories_kcal"),
             }
 
 
@@ -494,11 +489,11 @@ class WeeklyRecommendationsByPatientView(APIView):
             prompt = f"""
 You are a senior clinical dietitian evaluating a long-term care patient (Room {patient.get('room_number')}, Bed {patient.get('bed_number')}) for the past 7 days.
 
-You are provided with their weekly average calculated intake, mathematical remarks, and the official Taiwan HPA Guidelines.
+You are provided with their 7-day accumulated total intake, mathematical remarks, and the official Taiwan HPA Guidelines.
 
 Patient Context:
 {get_patient_info(patient)}
-Weekly Average Intake: {weekly_average_nutri_content}
+Weekly Total Intake (7-day accumulated): {weekly_total_nutri_content}
 Mathematical Remarks: {weekly_nutrition_remarks}
 
 HPA Guidelines Context:
@@ -515,7 +510,7 @@ TASK:
 You MUST format your response EXACTLY according to the following structure. Do not deviate. Answer in English.
 
 AI Dietary Analysis:
-(Write 2-3 sentences synthesizing the Mathematical Remarks with specific thresholds from the HPA Guidelines Context. Explicitly mention the HPA guidelines. Explain what is deficient or excessive clinically based on the weekly average.)
+(Write 2-3 sentences synthesizing the Mathematical Remarks with specific thresholds from the HPA Guidelines Context. Explicitly mention the HPA guidelines. Explain what is deficient or excessive clinically based on the 7-day accumulated total.)
 
 Recommended Meals:
 (Select exactly 5 meals from the 'Available Meals' list to correct the patient's specific deficits or excesses. Provide a 1-sentence clinical justification for EACH meal.)
@@ -534,7 +529,18 @@ Rules:
 - If there are no food intake records for the past 7 days, output ONLY: "Dietary recommendations cannot be provided because no intake was recorded for this period."
 - ONLY use meals from the Available Meals list.
 """
-            meal_recos = ask_llm(prompt)
+            try:
+                print(f"\n🔍 DEBUG: Calling ask_llm with prompt length: {len(prompt)}")
+                print(f"🔍 DEBUG: First 200 chars of prompt: {prompt[:200]}")
+                meal_recos = ask_llm(prompt)
+                print(f"✅ DEBUG: ask_llm successful! Response length: {len(meal_recos)}")
+            except Exception as e:
+                print(f"\n❌ ERROR in ask_llm:")
+                print(f"Error type: {type(e).__name__}")
+                print(f"Error message: {str(e)}")
+                import traceback
+                print(traceback.format_exc())
+                meal_recos = f"Error: {str(e)}"
 
             
             # 5. FORMAT weekly_data FOR RESPONSE
@@ -544,13 +550,14 @@ Rules:
 
             # 6. SEND RESPONSE
             response = {
-                    "response": meal_recos,
-                    "dates_list": dates_list,
-                    "patient_dris": patient_dris,
-                    "weekly_data": weekly_data,
-                    "weekly_average_nutritional_content": weekly_average_nutri_content,
-                    "weekly_nutrition_remarks": weekly_nutrition_remarks,
-                }
+                "response": meal_recos,
+                "dates_list": dates_list,
+                "patient_dris": patient_dris,
+                "weekly_dri": weekly_dri,
+                "weekly_data": weekly_data,
+                "weekly_total_nutritional_content": weekly_total_nutri_content,
+                "weekly_nutrition_remarks": weekly_nutrition_remarks,
+            }
             
             return Response(
                 response,
@@ -589,11 +596,23 @@ class MonthlyRecommendationsByPatientView(APIView):
                 "fiber_g": get_dri_min_max(patient_dris["dri_fiber"]),
             }
 
-            
+            # Weekly DRI = daily DRI × 7 (used for per-week comparison inside monthly view)
+            weekly_dri = {
+                nutrient: {"min": round(val["min"] * 7, 2), "max": round(val["max"] * 7, 2)}
+                for nutrient, val in patient_dris.items()
+            }
+
+            # Monthly DRI = daily DRI × 28
+            monthly_dri = {
+                nutrient: {"min": round(val["min"] * 28, 2), "max": round(val["max"] * 28, 2)}
+                for nutrient, val in patient_dris.items()
+            }
+
             # Food Intakes (Last 28 days)
             TOTAL_DAYS = 28
             # a. Current date
-            curdate = datetime.now(ZoneInfo("Asia/Taipei")).date()
+            requested_date = request.GET.get('date')
+            curdate = datetime.strptime(requested_date, "%Y-%m-%d").date() if requested_date else datetime.now(ZoneInfo("Asia/Taipei")).date()
 
             # b. Create a list of dates of the previous 28 days            
             dates_list = [
@@ -684,77 +703,45 @@ class MonthlyRecommendationsByPatientView(APIView):
             weekly_data = {}
 
             for i, week in enumerate(weeks, start=1):
-                # b. Get valid days with food intake records (to only get average of days with records)
-                valid_days = [day for day in week if day.get("food_intake_docs")]
-            
-                # c. Calculate weekly average for each nutrient based on valid days
-                num = len(valid_days)
-                if valid_days:
-                    weekly_average_nutri_content = {
-                        "calories_kcal": sum(day["total_nutritional_content"]["calories_kcal"] for day in valid_days) / num,
-                        "protein_g": sum(day["total_nutritional_content"]["protein_g"] for day in valid_days) / num,
-                        "fats_g": sum(day["total_nutritional_content"]["fats_g"] for day in valid_days) / num,
-                        "carbohydrates_g": sum(day["total_nutritional_content"]["carbohydrates_g"] for day in valid_days) / num,
-                        "fiber_g": sum(day["total_nutritional_content"]["fiber_g"] for day in valid_days) / num,
-                    }
-                else:
-                    # d. If no valid days (i.e., no food intake records), set weekly average to 0 or None
-                    weekly_average_nutri_content = {
-                        "calories_kcal": 0,
-                        "protein_g": 0,
-                        "fats_g": 0,
-                        "carbohydrates_g": 0,
-                        "fiber_g": 0,
-                    }
-            
-                    # d. GET NUTRITIONAL REMARKS BASED ON RECOMMENDED INTAKE AND WEEKLY AVERAGE INTAKE 
+                # Weekly total = sum of all 7 days in this week (days with no intake contribute 0)
+                weekly_total_nutri_content = {
+                    "calories_kcal": round(sum(day["total_nutritional_content"]["calories_kcal"] for day in week), 2),
+                    "protein_g": round(sum(day["total_nutritional_content"]["protein_g"] for day in week), 2),
+                    "fats_g": round(sum(day["total_nutritional_content"]["fats_g"] for day in week), 2),
+                    "carbohydrates_g": round(sum(day["total_nutritional_content"]["carbohydrates_g"] for day in week), 2),
+                    "fiber_g": round(sum(day["total_nutritional_content"]["fiber_g"] for day in week), 2),
+                }
+
+                # Weekly remarks: week total vs weekly DRI (DRI × 7)
                 weekly_nutrition_remarks = {
-                    "protein_g": get_nutrition_remarks(patient_dris, weekly_average_nutri_content, nutrient = "protein_g"),
-                    "fats_g": get_nutrition_remarks(patient_dris, weekly_average_nutri_content, nutrient = "fats_g"),
-                    "carbohydrates_g": get_nutrition_remarks(patient_dris, weekly_average_nutri_content, nutrient = "carbohydrates_g"),
-                    "fiber_g": get_nutrition_remarks(patient_dris, weekly_average_nutri_content, nutrient = "fiber_g"),
-                    "calories_kcal": get_nutrition_remarks(patient_dris, weekly_average_nutri_content, nutrient = "calories_kcal"),
+                    "protein_g": get_nutrition_remarks(weekly_dri, weekly_total_nutri_content, nutrient="protein_g"),
+                    "fats_g": get_nutrition_remarks(weekly_dri, weekly_total_nutri_content, nutrient="fats_g"),
+                    "carbohydrates_g": get_nutrition_remarks(weekly_dri, weekly_total_nutri_content, nutrient="carbohydrates_g"),
+                    "fiber_g": get_nutrition_remarks(weekly_dri, weekly_total_nutri_content, nutrient="fiber_g"),
+                    "calories_kcal": get_nutrition_remarks(weekly_dri, weekly_total_nutri_content, nutrient="calories_kcal"),
                 }
 
                 weekly_data[i] = {
-                    "weekly_average_nutritional_content": weekly_average_nutri_content,
+                    "weekly_total_nutritional_content": weekly_total_nutri_content,
                     "weekly_nutrition_remarks": weekly_nutrition_remarks
                 }
 
-            # 4. MONTHLY AVERAGE
-            # a. Get valid weeks with food intake records (to only get average of weeks with records)
-            valid_weeks = [    
-                week for week in weekly_data.values()
-                if week["weekly_average_nutritional_content"]["protein_g"] != 0
-            ]
+            # 4. MONTHLY TOTAL (sum of all 4 weekly totals)
+            monthly_total_nutri_content = {
+                "calories_kcal": round(sum(week["weekly_total_nutritional_content"]["calories_kcal"] for week in weekly_data.values()), 2),
+                "protein_g": round(sum(week["weekly_total_nutritional_content"]["protein_g"] for week in weekly_data.values()), 2),
+                "fats_g": round(sum(week["weekly_total_nutritional_content"]["fats_g"] for week in weekly_data.values()), 2),
+                "carbohydrates_g": round(sum(week["weekly_total_nutritional_content"]["carbohydrates_g"] for week in weekly_data.values()), 2),
+                "fiber_g": round(sum(week["weekly_total_nutritional_content"]["fiber_g"] for week in weekly_data.values()), 2),
+            }
 
-            # b. Calculate monthly average for each nutrient based on valid days
-            num = len(valid_weeks)
-            if valid_weeks:
-                monthly_average_nutri_content = {
-                    "calories_kcal": sum(week["weekly_average_nutritional_content"]["calories_kcal"] for week in valid_weeks) / num,
-                    "protein_g": sum(week["weekly_average_nutritional_content"]["protein_g"] for week in valid_weeks) / num,
-                    "fats_g": sum(week["weekly_average_nutritional_content"]["fats_g"] for week in valid_weeks) / num,
-                    "carbohydrates_g": sum(week["weekly_average_nutritional_content"]["carbohydrates_g"] for week in valid_weeks) / num,
-                    "fiber_g": sum(week["weekly_average_nutritional_content"]["fiber_g"] for week in valid_weeks) / num,
-                }
-            else:
-                # c. If no valid weeks (i.e., no intakes & nutrients), set monthly average to 0 or None
-                monthly_average_nutri_content = {
-                    "calories_kcal": 0,
-                    "protein_g": 0,
-                    "fats_g": 0,
-                    "carbohydrates_g": 0,
-                    "fiber_g": 0,
-                }
-
-                # d. GET NUTRITIONAL REMARKS BASED ON RECOMMENDED INTAKE AND MONTHLY AVERAGE INTAKE 
+            # Monthly remarks: 28-day total vs monthly DRI (DRI × 28)
             monthly_nutrition_remarks = {
-                "protein_g": get_nutrition_remarks(patient_dris, monthly_average_nutri_content, nutrient = "protein_g"),
-                "fats_g": get_nutrition_remarks(patient_dris, monthly_average_nutri_content, nutrient = "fats_g"),
-                "carbohydrates_g": get_nutrition_remarks(patient_dris, monthly_average_nutri_content, nutrient = "carbohydrates_g"),
-                "fiber_g": get_nutrition_remarks(patient_dris, monthly_average_nutri_content, nutrient = "fiber_g"),
-                "calories_kcal": get_nutrition_remarks(patient_dris, monthly_average_nutri_content, nutrient = "calories_kcal"),
+                "protein_g": get_nutrition_remarks(monthly_dri, monthly_total_nutri_content, nutrient="protein_g"),
+                "fats_g": get_nutrition_remarks(monthly_dri, monthly_total_nutri_content, nutrient="fats_g"),
+                "carbohydrates_g": get_nutrition_remarks(monthly_dri, monthly_total_nutri_content, nutrient="carbohydrates_g"),
+                "fiber_g": get_nutrition_remarks(monthly_dri, monthly_total_nutri_content, nutrient="fiber_g"),
+                "calories_kcal": get_nutrition_remarks(monthly_dri, monthly_total_nutri_content, nutrient="calories_kcal"),
             }
 
 
@@ -782,11 +769,11 @@ class MonthlyRecommendationsByPatientView(APIView):
             prompt = f"""
 You are a senior clinical dietitian evaluating a long-term care patient (Room {patient.get('room_number')}, Bed {patient.get('bed_number')}) for the past 28 days.
 
-You are provided with their monthly average calculated intake, mathematical remarks, and the official Taiwan HPA Guidelines.
+You are provided with their 28-day accumulated total intake, mathematical remarks, and the official Taiwan HPA Guidelines.
 
 Patient Context:
 {get_patient_info(patient)}
-Monthly Average Intake: {monthly_average_nutri_content}
+Monthly Total Intake (28-day accumulated): {monthly_total_nutri_content}
 Mathematical Remarks: {monthly_nutrition_remarks}
 
 HPA Guidelines Context:
@@ -803,7 +790,7 @@ TASK:
 You MUST format your response EXACTLY according to the following structure. Do not deviate. Answer in English.
 
 AI Dietary Analysis:
-(Write 2-3 sentences synthesizing the Mathematical Remarks with specific thresholds from the HPA Guidelines Context. Explicitly mention the HPA guidelines. Explain what is deficient or excessive clinically based on the monthly average.)
+(Write 2-3 sentences synthesizing the Mathematical Remarks with specific thresholds from the HPA Guidelines Context. Explicitly mention the HPA guidelines. Explain what is deficient or excessive clinically based on the 28-day accumulated total.)
 
 Recommended Meals:
 (Select exactly 5 meals from the 'Available Meals' list to correct the patient's specific deficits or excesses. Provide a 1-sentence clinical justification for EACH meal.)
@@ -835,9 +822,10 @@ Rules:
                 "response": meal_recos,
                 "dates_list": dates_list,
                 "patient_dris": patient_dris,
+                "monthly_dri": monthly_dri,
                 "monthly_data": monthly_data,
                 "weekly_data": weekly_data,
-                "monthly_average_nutritional_content": monthly_average_nutri_content,
+                "monthly_total_nutritional_content": monthly_total_nutri_content,
                 "monthly_nutrition_remarks": monthly_nutrition_remarks,
             }
 
@@ -855,6 +843,160 @@ Rules:
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
+
+
+# ==================================
+# TREND ENDPOINTS (lightweight — no LLM calls)
+# ==================================
+
+class WeeklyTrendByPatientView(APIView):
+    """Returns chart-ready payload for the 7-day trend graph. No LLM involved."""
+    def get(self, request, pk):
+        try:
+            # Patient profile
+            patient_profile = get_patient_profile(pk)
+            if not patient_profile:
+                return Response({"detail": f"Patient {pk} not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            # Dietary targets
+            dietary_targets = get_patient_dietary_targets(pk)
+            if not dietary_targets:
+                return Response({"detail": f"No dietary targets found for patient {pk}."}, status=status.HTTP_404_NOT_FOUND)
+            raw_dris = dietary_targets[0][1]
+            daily_dri = {
+                "calories_kcal": get_dri_min_max(raw_dris["dri_calories"]),
+                "protein_g": get_dri_min_max(raw_dris["dri_protein"]),
+                "fats_g": get_dri_min_max(raw_dris["dri_fat"]),
+                "carbohydrates_g": get_dri_min_max(raw_dris["dri_carbohydrate"]),
+                "fiber_g": get_dri_min_max(raw_dris["dri_fiber"]),
+            }
+            weekly_dri = {
+                nutrient: {"min": round(val["min"] * 7, 2), "max": round(val["max"] * 7, 2)}
+                for nutrient, val in daily_dri.items()
+            }
+
+            # Build 7-day date list (newest → oldest)
+            requested_date = request.GET.get('date')
+            curdate = datetime.strptime(requested_date, "%Y-%m-%d").date() if requested_date else datetime.now(ZoneInfo("Asia/Taipei")).date()
+            dates = [(curdate - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(6, -1, -1)]
+            labels = [f"{(curdate - timedelta(days=i)).strftime('%b')} {(curdate - timedelta(days=i)).day}" for i in range(6, -1, -1)]
+
+            # Per-day nutrition
+            nutrients = ["calories_kcal", "protein_g", "fats_g", "carbohydrates_g", "fiber_g"]
+            datasets = {n: [] for n in nutrients}
+            remarks_by_day = {}
+
+            for date in dates:
+                intake_results = get_patient_segmented_intake(pk, date)
+                food_intake_docs = format_food_intakes_docs(intake_results)
+                calculated_intake = calculate_food_item_intake(food_intake_docs)
+
+                lunch_intakes = calculated_intake['by_meal'].get('lunch')
+                dinner_intakes = calculated_intake['by_meal'].get('dinner')
+                lunch_nutri = get_nutritional_content_in_json(format_calculated_intakes(lunch_intakes) if lunch_intakes else None)
+                dinner_nutri = get_nutritional_content_in_json(format_calculated_intakes(dinner_intakes) if dinner_intakes else None)
+
+                day_total = {n: round(lunch_nutri[n] + dinner_nutri[n], 2) for n in nutrients}
+                day_remarks = {n: get_nutrition_remarks(daily_dri, day_total, nutrient=n) for n in nutrients}
+
+                for n in nutrients:
+                    datasets[n].append(day_total[n])
+                remarks_by_day[date] = day_remarks
+
+            # 7-day totals
+            total = {n: round(sum(datasets[n]), 2) for n in nutrients}
+            weekly_nutrition_remarks = {n: get_nutrition_remarks(weekly_dri, total, nutrient=n) for n in nutrients}
+
+            return Response({
+                "patient_id": pk,
+                "period": "weekly",
+                "labels": labels,
+                "dates": dates,
+                "datasets": datasets,
+                "remarks_by_day": remarks_by_day,
+                "total": total,
+                "daily_dri": daily_dri,
+                "weekly_dri": weekly_dri,
+                "weekly_nutrition_remarks": weekly_nutrition_remarks,
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"detail": "Error generating trend data", "error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class MonthlyTrendByPatientView(APIView):
+    """Returns chart-ready payload for the 28-day trend graph. No LLM involved."""
+    def get(self, request, pk):
+        try:
+            # Patient profile
+            patient_profile = get_patient_profile(pk)
+            if not patient_profile:
+                return Response({"detail": f"Patient {pk} not found."}, status=status.HTTP_404_NOT_FOUND)
+
+            # Dietary targets
+            dietary_targets = get_patient_dietary_targets(pk)
+            if not dietary_targets:
+                return Response({"detail": f"No dietary targets found for patient {pk}."}, status=status.HTTP_404_NOT_FOUND)
+            raw_dris = dietary_targets[0][1]
+            daily_dri = {
+                "calories_kcal": get_dri_min_max(raw_dris["dri_calories"]),
+                "protein_g": get_dri_min_max(raw_dris["dri_protein"]),
+                "fats_g": get_dri_min_max(raw_dris["dri_fat"]),
+                "carbohydrates_g": get_dri_min_max(raw_dris["dri_carbohydrate"]),
+                "fiber_g": get_dri_min_max(raw_dris["dri_fiber"]),
+            }
+            monthly_dri = {
+                nutrient: {"min": round(val["min"] * 28, 2), "max": round(val["max"] * 28, 2)}
+                for nutrient, val in daily_dri.items()
+            }
+
+            # Build 28-day date list (oldest → newest)
+            requested_date = request.GET.get('date')
+            curdate = datetime.strptime(requested_date, "%Y-%m-%d").date() if requested_date else datetime.now(ZoneInfo("Asia/Taipei")).date()
+            dates = [(curdate - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(27, -1, -1)]
+            labels = [f"{(curdate - timedelta(days=i)).strftime('%b')} {(curdate - timedelta(days=i)).day}" for i in range(27, -1, -1)]
+
+            # Per-day nutrition
+            nutrients = ["calories_kcal", "protein_g", "fats_g", "carbohydrates_g", "fiber_g"]
+            datasets = {n: [] for n in nutrients}
+            remarks_by_day = {}
+
+            for date in dates:
+                intake_results = get_patient_segmented_intake(pk, date)
+                food_intake_docs = format_food_intakes_docs(intake_results)
+                calculated_intake = calculate_food_item_intake(food_intake_docs)
+
+                lunch_intakes = calculated_intake['by_meal'].get('lunch')
+                dinner_intakes = calculated_intake['by_meal'].get('dinner')
+                lunch_nutri = get_nutritional_content_in_json(format_calculated_intakes(lunch_intakes) if lunch_intakes else None)
+                dinner_nutri = get_nutritional_content_in_json(format_calculated_intakes(dinner_intakes) if dinner_intakes else None)
+
+                day_total = {n: round(lunch_nutri[n] + dinner_nutri[n], 2) for n in nutrients}
+                day_remarks = {n: get_nutrition_remarks(daily_dri, day_total, nutrient=n) for n in nutrients}
+
+                for n in nutrients:
+                    datasets[n].append(day_total[n])
+                remarks_by_day[date] = day_remarks
+
+            # 28-day totals
+            total = {n: round(sum(datasets[n]), 2) for n in nutrients}
+            monthly_nutrition_remarks = {n: get_nutrition_remarks(monthly_dri, total, nutrient=n) for n in nutrients}
+
+            return Response({
+                "patient_id": pk,
+                "period": "monthly",
+                "labels": labels,
+                "dates": dates,
+                "datasets": datasets,
+                "remarks_by_day": remarks_by_day,
+                "total": total,
+                "daily_dri": daily_dri,
+                "monthly_dri": monthly_dri,
+                "monthly_nutrition_remarks": monthly_nutrition_remarks,
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"detail": "Error generating trend data", "error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # From actual db

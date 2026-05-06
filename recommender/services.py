@@ -100,7 +100,7 @@ def calculate_food_item_intake(food_intake_docs, debug=False):
         # [For no after meal_phase case handling] If after meal data is missing, assume all before meal volume is consumed (i.e., after meal volume = 0)
         # CASE 2: No AFTER meal phase → everything consumed
         if not after_items:
-            after_items = {food: 0 for food in before_items}
+            continue
 
         # [For new food items in after meal_phase handling] If after meal has detected food items not present in before meal, assume they were not part of the original meal and thus not consumed. Therefore, disregard new items in after meal for intake calculation)
         # CASE 3: AFTER exists but has new food items not in BEFORE → disregard new items 
