@@ -12,7 +12,7 @@ from .services.hpa_retriever_services import build_prompt, build_rag_context, qd
 
 # Patient Docs RAG Services
 from .services.patient_docs_sql_ingestor import embed_doc
-from .services.patient_docs_retriever import get_patient_food_intake, get_patient_segmented_intake, vector_search_patient_docs_chinese, vector_search_patient_docs_english, build_prompt_for_patient_docs
+from .services.patient_docs_retriever import get_patient_food_intake, get_patient_profile, get_patient_segmented_intake, vector_search_patient_docs_chinese, vector_search_patient_docs_english, build_prompt_for_patient_docs, vector_search_patient_docs
 from .services.generator import ask_llm
 
 from qdrant_client.models import PointStruct
@@ -20,10 +20,9 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
 from .services.patient_docs_sql_ingestor import embed_doc, qd_client
 
-# AMIEL'S FOOD INTAKE BACKEND URL
-FOOD_INTAKE_BACKEND_URL = "https://h3vkhzth-8000.asse.devtunnels.ms/api/"
 
-# STANDBY - A generic endpoint that takes a free-text query, searches both the English patient docs and the HPA dietary guidelines, and combines them into one prompt. This is a classic "Chatbot" endpoint. It isn't currently wired to any specific UI component you've shown me, but it's a fully functional, standard RAG endpoint that might be used for a general "Ask the AI" feature.
+
+
 class CombinedRAGView(APIView):
     def post(self, request):
         query = request.data.get("query")
@@ -92,7 +91,7 @@ Dietary guidelines context:
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-# STANDBY - Similar to above, but exclusively searches the Taiwan HPA dietary guidelines. Not tied to the Patient Details or Analysis pages, but likely used if you have a "Guidelines Search" UI elsewhere.
+
 # Taiwan HPA RAG
 class HpaDocsRetrievalRagQueryView(APIView):
     def post(self, request):
@@ -128,7 +127,7 @@ class HpaDocsRetrievalRagQueryView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-# STANDBY - A pure chat endpoint that queries the ltc_chinese_semantic_graph collection. Not used in your current UI flow.
+
 # (CHINESE) Patient Docs RAG        
 class PatientDocsRagQueryView(APIView):
     def post(self, request):
@@ -191,7 +190,7 @@ class PatientDocsRagQueryView(APIView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-# STANDBY - Same as above, but exclusively searches the English patient docs collection. Not used in your current UI flow.
+
 # (ENGLISH) Patient Docs RAG
 class PatientDocsEnglishRagQueryView(APIView):
     def post(self, request):
@@ -255,7 +254,7 @@ class PatientDocsEnglishRagQueryView(APIView):
             )
 
 
-# OKAY - When the 5070 MySQL database updates, the signal sends a payload here. This view embeds the data and saves it into the Qdrant ltc_semantic_graph_2 collection. If you delete this, your vector database stops updating.
+
 # 5090 server
 class Receive5090PayloadView(APIView):
     """
@@ -325,13 +324,14 @@ class Receive5090PayloadView(APIView):
                 points=[point]
             )
 
-            print(f"Upserted point with ID: {point_id} into ltc_semantic_graph_2 collection.")
+            print(f"Upserted point with ID: {point_id} into ltc_semantic_graph 2 collection.")
+
             return Response({"status": "Successfully ingested to 5070 Qdrant", "id": point_id}, status=status.HTTP_200_OK)
 
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-# OKAY - The exact same ingestion logic as above, but it saves the embedded data to the ltc_chinese_semantic_graph collection.
+
 class Receive5090PayloadChineseDocsView(APIView):
     """ CHINESE VERSION
     Webhook to catch semantic JSON payloads from the 5090, 
@@ -405,23 +405,16 @@ class Receive5090PayloadChineseDocsView(APIView):
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-# Patient Food Intake Summary
-FOOD_INTAKE_BACKEND_URL = "https://h3vkhzth-8000.asse.devtunnels.ms/api/"
-
-
-# OKAY - USED IN PATIENT DETAILS PAGE ON THE TEXTAREA FOR DAILY FOOD INTAKE RECOMMENDATION ==========
 class PatientFoodIntakeSummaryView(APIView):    
     def get(self, request, pk):
         try:
-            # patient = requests.get(f"{FOOD_INTAKE_BACKEND_URL}ltc-patients/{pk}").json()
-            # patient_id = patient.get("id")
-            # room_number = patient.get("room_number")
-            # bed_number = patient.get("bed_number") 
-            curdate = datetime.now().strftime("%Y-%m-%d")
-            # curdate = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d")
+            patient_profile= get_patient_profile(pk)
+            patient = patient_profile[0][1]
+            # curdate = datetime.now().strftime("%Y-%m-%d")
+            curdate = datetime.now(ZoneInfo("Asia/Taipei")).strftime("%Y-%m-%d")
 
             # Get relevant docs
-            food_intake_res = get_patient_segmented_intake(str(pk), curdate,)
+            food_intake_res = get_patient_food_intake(pk, curdate,)
             
             food_intake_chunks = [
                 {
@@ -433,19 +426,17 @@ class PatientFoodIntakeSummaryView(APIView):
             ]
 
             # Build context 
-            food_intake_context = "\n\n - ".join([doc for doc, metadata in food_intake_res])
+            food_intake_context = "\n\n ".join([doc for doc, metadata in food_intake_res])
 
             # Build prompt
             prompt = (
-                # f"根據以下資訊，請提供長期照護病患於{curdate}當日，入住{room_number}病房、{bed_number}床位的膳食攝取紀錄摘要。"
-                f"根據以下資訊，請提供長期照護病患於{curdate}當日的膳食攝取紀錄摘要。"
-                f"相關資訊："
-                f"\nFood intakes for today:\n{food_intake_context}"
-                f"\n回應規則："
-                f"- If no meal records exist for {curdate}, politely state the patient has no intake records for today."
-                f"- If there is an existing meal record, calculate the total intake in g and ml, at the end of the summary."
-                f"- 請言簡意賅。回覆字數應少於210個字。"
-                f"- 請僅以繁體中文回覆。"
+                f"Based on the following food intake records for {curdate}, write a brief summary for a long-term care patient."
+                f"\n\nFood intake records:\n{food_intake_context}"
+                f"\n\nRules:"
+                f"\n1. State ONLY which meals the patient had (e.g., lunch, dinner, both, or none)."
+                f"\n2. For each meal present, mention only whether a before-meal (Gross) and after-meal (Leftover/Net) record was taken. Do NOT mention any specific quantities, grams, or milliliters."
+                f"\n3. If no records exist for {curdate}, state: 'No food intake records were recorded for this date.'"
+                f"\n4. Keep the response to 2-3 sentences maximum. Answer in English."
             )
 
             # Pass context to LLM
@@ -455,7 +446,7 @@ class PatientFoodIntakeSummaryView(APIView):
                 {
                     "response": response,
                     "final_prompt": prompt,
-                    "food_intake_chunks": food_intake_chunks,
+                    "food_intake_chunks": food_intake_context,
                     "date": curdate
                 },
                 status=status.HTTP_200_OK
@@ -471,81 +462,61 @@ class PatientFoodIntakeSummaryView(APIView):
             )
 
 
+class PatientFoodIntakeSummaryByDateView(APIView):    
+    def get(self, request, pk, date):
+        try:
+            patient_profile= get_patient_profile(pk)
+            patient = patient_profile[0][1]
+
+            # Get relevant docs
+            food_intake_res = get_patient_food_intake(pk, date)
+            
+            food_intake_chunks = [
+                {
+                    "result": i + 1,
+                    "chunk": doc,
+                    "metadata": metadata
+                }
+                for i, (doc, metadata) in enumerate(food_intake_res)
+            ]
+
+            # Build context 
+            food_intake_context = "\n\n ".join([doc for doc, metadata in food_intake_res])
+
+            # Build prompt
+            prompt = (
+                f"Based on the following food intake records for {date}, write a brief summary for a long-term care patient."
+                f"\n\nFood intake records:\n{food_intake_context}"
+                f"\n\nRules:"
+                f"\n1. State ONLY which meals the patient had (e.g., lunch, dinner, both, or none)."
+                f"\n2. For each meal present, mention only whether a before-meal (Gross) and after-meal (Leftover/Net) record was taken. Do NOT mention any specific quantities, grams, or milliliters."
+                f"\n3. If no records exist for {date}, state: 'No food intake records were recorded for this date.'"
+                f"\n4. Keep the response to 2-3 sentences maximum. Answer in English."
+            )
+
+            # Pass context to LLM
+            response = ask_llm(prompt)
+
+            return Response(
+                {
+                    "response": response,
+                    "final_prompt": prompt,
+                    "food_intake_chunks": food_intake_context,
+                    "food_intake_res": food_intake_res,
+                    "date": date
+                },
+                status=status.HTTP_200_OK
+            )
+
+        except Exception as e:
+            return Response(
+                {
+                    "detail": "Error generating response", 
+                    "error": str(e)
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 
-
-
-
-
-
-# OBSOLETE - NOT USED IN CURRENT UI FLOW, BUT RETAINED FOR FUTURE REFERENCE.
-# class RagQueryByPatientView(APIView):    
-#     def post(self, request, ltc_patient_id, model_name=None):
-#         try:
-#             patient = requests.get(f"{FOOD_INTAKE_BACKEND_URL}ltc-patients/{ltc_patient_id}").json()
-#             patient_id = patient.get("id")
-#             patient_room_number = patient.get("room_number")
-#             patient_bed_number = patient.get("bed_number")
-#             patient_age = patient.get("age")
-#             patient_sex = patient.get("sex")
-#             patient_height_cm = patient.get("height_cm")
-#             patient_weight_kg = patient.get("weight_kg")
-#             patient_activity_level = patient.get("activity_level")
-
-#             # TW DRI CALCULATOR
-#             dri = 
-
-#             meal_lines = []
-#             for idx, assignment in enumerate(patient.get("meal_assignments", []), start=1):
-#                 meal_id = assignment.get("meal")
-#                 meal = requests.get(
-#                     f"{FOOD_INTAKE_BACKEND_URL}meals/{meal_id}"
-#                 ).json()
-
-#                 meal_lines.append(
-#                     f"Meal {idx}: {meal.get('meal_name', 'N/A')}"
-#                 )
-
-#             query = f"""
-# PATIENT DETAILS:
-# Patient Room & Number: {patient.get('name')}
-# Age: {patient.get('age')}
-# Gender: {patient.get('sex').capitalize()}
-# Height: {patient.get('height_cm')} cm
-# Weight: {patient.get('weight_kg')} kg
-# BMI: {patient.get('bmi')}
-# Heart Rate: {patient.get('heart_rate')} bpm
-# Blood Pressure: {patient.get('systolic_bp')}/{patient.get('diastolic_bp')} mmHg
-# Activity Level: {patient.get('activity_level').capitalize()}
-
-# RECOMMENDED DAILY INTAKE:
-# Calories: {intake.get('daily_caloric_needs')} kcal
-# Protein: {intake.get('protein')} g
-# Carbohydrates: {intake.get('carbohydrate')} g
-# Fat: {intake.get('fat')} g
-# Total Fiber: {intake.get('total_fiber')} g
-# Alpha Linolenic Acid: {intake.get('alpha_linolenic_acid')} g
-# Linoleic Acid: {intake.get('linoleic_acid')} g
-# Total Water: {intake.get('total_water')} L
-
-# MEAL INTAKES:
-# """ + "\n".join(meal_lines)
-
-
-#             return Response(
-#                 {
-#                     "response": ask(query)
-#                 },
-#                 status=status.HTTP_200_OK
-#             )
-
-#         except Exception as e:
-#             return Response(
-#                 {
-#                     "detail": "Error generating response", 
-#                     "error": str(e)
-#                 },
-#                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
-#             )
 

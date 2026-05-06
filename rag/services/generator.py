@@ -1,53 +1,3 @@
-# import ollama
-
-# def ask_llm(prompt: str):
-#     response = ollama.chat(
-#         model="qwen2.5:7b", 
-#         messages=[
-#             {"role": "system", "content": "你是一個專業營養助理。"},
-#             {"role": "user", "content": prompt}
-#         ],
-#         keep_alive=-1,
-#         options={"temperature": 0}
-#     )
-#     return response["message"]["content"].strip()
-
-# import ollama
-# # ==================================
-# # Ask Local LLM (Ollama)
-# # ==================================
-# def ask_ollama_llm(prompt):
-#     response = ollama.chat(
-#         model="gemma3:4b", # model="qwen:7b", 
-#         messages=[
-#             {"role": "system", "content": "你是一個專業營養助理。"},
-#             {"role": "user", "content": prompt}
-#         ],
-#         options={
-#             "temperature": 0
-#         }
-#     )
-
-#     return response["message"]["content"].strip()
-
-
-# # def ask_llm(prompt: str):
-# #     response = ollama.chat(
-# #         model="gemma3:4b", # model="qwen:7b", 
-# #         messages=[
-# #             {"role": "system", "content": "你是一個專業營養助理。"},
-# #             {"role": "user", "content": prompt}
-# #         ],
-# #         options={
-# #             "temperature": 0
-# #         }
-# #     )
-
-# #     return response["message"]["content"].strip()
-
-
-
-
 # # ==================================
 # # Ask Groq LLM
 # # ==================================
@@ -57,7 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 def ask_llm(prompt: str):

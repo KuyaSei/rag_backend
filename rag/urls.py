@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import CombinedRAGView, HpaDocsRetrievalRagQueryView, PatientDocsRagQueryView, PatientDocsEnglishRagQueryView, PatientFoodIntakeSummaryView, Receive5090PayloadView, Receive5090PayloadChineseDocsView
+from .views import CombinedRAGView, HpaDocsRetrievalRagQueryView, PatientDocsRagQueryView, PatientDocsEnglishRagQueryView, PatientFoodIntakeSummaryByDateView, PatientFoodIntakeSummaryView, Receive5090PayloadView, Receive5090PayloadChineseDocsView
 
 # BASE ENDPOINT: /api/z
 
@@ -23,6 +23,10 @@ urlpatterns = [
     # Patient Daily food intake summary
     path("patient/<int:pk>/meal-intake", PatientFoodIntakeSummaryView.as_view()),
     path("patient/<int:pk>/meal-intake/", PatientFoodIntakeSummaryView.as_view()),
+
+    # Update these lines to include the date parameter
+    path("patient/<int:pk>/meal-intake/<str:date>", PatientFoodIntakeSummaryByDateView.as_view()),
+    path("patient/<int:pk>/meal-intake/<str:date>/", PatientFoodIntakeSummaryByDateView.as_view()),
 
     # Update these lines to include the date parameter
     path("patient/<int:pk>/meal-intake/<str:date>", PatientFoodIntakeSummaryView.as_view()),

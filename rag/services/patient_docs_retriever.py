@@ -44,7 +44,7 @@ EMBEDDING_MODEL = SentenceTransformer('sentence-transformers/paraphrase-multilin
 # English
 def vector_search_patient_docs_english(query, top_k=5):
     # Qdrant Collection
-    COLLECTION_NAME = "ltc_semantic_graph" 
+    COLLECTION_NAME = "ltc_semantic_graph_2" 
 
     # Embed the query
     q_emb = EMBEDDING_MODEL.encode(query).tolist()
@@ -76,28 +76,29 @@ def vector_search_patient_docs_chinese(query, top_k=5):
 
     return [(hit.payload["page_content"], hit.payload["metadata"], hit.score) for hit in results.points]
 
-# OBSOLETE - dead code
+
 # Query & Filter by patient ID (pid)
-# def vector_search_patient_docs(query, pid, top_k=5):
-#     # Qdrant Collection
-#     COLLECTION_NAME = "ltc_semantic_graph" 
+def vector_search_patient_docs(query, pid, top_k=5):
+    # Qdrant Collection
+    COLLECTION_NAME = "ltc_semantic_graph_2" 
 
-#     # Embed the query
-#     q_emb = EMBEDDING_MODEL.encode(query).tolist()
+    # Embed the query
+    q_emb = EMBEDDING_MODEL.encode(query).tolist()
 
-#     # Search Qdrant (new API)
-#     results = qd_client.query_points(
-#         collection_name=COLLECTION_NAME,
-#         query=q_emb,
-#         limit=top_k,
-#         query_filter = flt(pid)
-#     )
+    # Search Qdrant (new API)
+    results = qd_client.query_points(
+        collection_name=COLLECTION_NAME,
+        query=q_emb,
+        limit=top_k,
+        query_filter = flt(pid)
+    )
 
-#     return [(hit.payload["page_content"], hit.payload["metadata"], hit.score) for hit in results.points]
+    return [(hit.payload["page_content"], hit.payload["metadata"], hit.score) for hit in results.points]
 
 
 def get_patient_profile(pid):
-    COLLECTION_NAME = "ltc_semantic_graph"
+    COLLECTION_NAME = "ltc_semantic_graph_2"
+
     results, _ = qd_client.scroll(
         collection_name=COLLECTION_NAME,
         scroll_filter=Filter(
@@ -108,67 +109,68 @@ def get_patient_profile(pid):
         ),
         limit=3
     )
-    # THE FIX: Return a tuple of (text, metadata) instead of just the text string
+
     return [
-        (point.payload.get("page_content", ""), point.payload.get("metadata", {}))
+        (point.payload["page_content"], point.payload.get("metadata"))
         for point in results
     ]
 
-#OBSOLETE - not used in current UI flow, but retained for future reference. This is a simple retrieval function that queries the ltc_semantic_graph collection by patient ID and date to retrieve food intake records. Your current frontend flow bypasses this and directly queries the MySQL database for this information, but you can refer to this function if you want to implement a vector search-based retrieval of patient food intake records in the future.
-# def get_patient_profile_by_room_and_bed(room_number, bed_number):
-#     COLLECTION_NAME = "ltc_semantic_graph"
+def get_patient_profile_by_room_and_bed(room_number, bed_number):
+    COLLECTION_NAME = "ltc_semantic_graph_2"
 
-#     results, _ = qd_client.scroll(
-#         collection_name=COLLECTION_NAME,
-#         scroll_filter=Filter(
-#             must=[
-#                 FieldCondition(key="metadata.doc_type", match=MatchValue(value="patient_profile")),
-#                 FieldCondition(key="metadata.room_number", match=MatchValue(value=room_number)),
-#                 FieldCondition(key="metadata.bed_number", match=MatchValue(value=bed_number)),
-#             ]
-#         ),
-#         limit=3
-#     )
+    results, _ = qd_client.scroll(
+        collection_name=COLLECTION_NAME,
+        scroll_filter=Filter(
+            must=[
+                FieldCondition(key="metadata.doc_type", match=MatchValue(value="patient_profile")),
+                FieldCondition(key="metadata.room_number", match=MatchValue(value=room_number)),
+                FieldCondition(key="metadata.bed_number", match=MatchValue(value=bed_number)),
+            ]
+        ),
+        limit=3
+    )
 
-#     return [
-#         (point.payload["page_content"])
-#         for point in results
-#     ]
+    return [
+        (point.payload["page_content"], point.payload.get("metadata"))
+        for point in results
+    ]
 
 def get_patient_dietary_targets(pid):
-    COLLECTION_NAME = "ltc_semantic_graph"
+    COLLECTION_NAME = "ltc_semantic_graph_2"
+
     results, _ = qd_client.scroll(
         collection_name=COLLECTION_NAME,
         scroll_filter=dri_flt(pid),
         limit=3
     )
-    # THE FIX: Return a tuple of (text, metadata) instead of just the text string
+
     return [
-        (point.payload.get("page_content", ""), point.payload.get("metadata", {}))
+        (point.payload["page_content"], point.payload.get("metadata"))
         for point in results
     ]
 
 
 def get_patient_food_intake(pid, dts, limit_per_scroll=10):
-    COLLECTION_NAME = "ltc_semantic_graph"
+    COLLECTION_NAME = "ltc_semantic_graph_2"
+
     all_results = []
+    offset = None
 
-    # Initial scroll
-    scroll_result, _ = qd_client.scroll(
-        collection_name=COLLECTION_NAME,
-        scroll_filter=bd_flt(pid, dts),
-        limit=limit_per_scroll
-    )
-    all_results.extend(scroll_result)
-
-    # Keep scrolling until no more results
-    while len(scroll_result) == limit_per_scroll:
-        scroll_result, _ = qd_client.scroll(
+    while True:
+        scroll_result, next_offset = qd_client.scroll(
             collection_name=COLLECTION_NAME,
             scroll_filter=bd_flt(pid, dts),
-            limit=limit_per_scroll
+            limit=limit_per_scroll,
+            offset=offset,
         )
+
         all_results.extend(scroll_result)
+
+        # stop condition
+        if next_offset is None:
+            break
+
+        offset = next_offset
 
     return [
         (point.payload.get("page_content"), point.payload.get("metadata"))
@@ -176,56 +178,32 @@ def get_patient_food_intake(pid, dts, limit_per_scroll=10):
     ]
 
 
-# def get_patient_segmented_intake(pid, dts, limit_per_scroll=10):
-#     COLLECTION_NAME = "ltc_semantic_graph"
-#     all_results = []
-
-#     # Initial scroll
-#     scroll_result, _ = qd_client.scroll(
-#         collection_name=COLLECTION_NAME,
-#         scroll_filter=si_flt(pid, dts),
-#         limit=limit_per_scroll
-#     )
-#     all_results.extend(scroll_result)
-
-#     # Keep scrolling until no more results
-#     while len(scroll_result) == limit_per_scroll:
-#         scroll_result, _ = qd_client.scroll(
-#             collection_name=COLLECTION_NAME,
-#             scroll_filter=si_flt(pid, dts),
-#             limit=limit_per_scroll
-#         )
-#         all_results.extend(scroll_result)
-
-#     return [
-#         (point.payload.get("page_content"), point.payload.get("metadata"))
-#         for point in all_results
-#     ]
-
 def get_patient_segmented_intake(pid, dts, limit_per_scroll=10):
-    COLLECTION_NAME = "ltc_semantic_graph"
+    COLLECTION_NAME = "ltc_semantic_graph_2"
+
     all_results = []
-    next_page_offset = None  # You MUST track the offset to actually paginate
+    offset = None
 
     while True:
-        scroll_result, next_page_offset = qd_client.scroll(
+        scroll_result, next_offset = qd_client.scroll(
             collection_name=COLLECTION_NAME,
             scroll_filter=si_flt(pid, dts),
             limit=limit_per_scroll,
-            offset=next_page_offset  # Pass the offset to get the next batch
+            offset=offset,
         )
+
         all_results.extend(scroll_result)
-        
-        # If Qdrant returns None for the offset, we have hit the end of the records
-        if next_page_offset is None:
+
+        # stop condition
+        if next_offset is None:
             break
 
-    # Return the tuple safely with fallbacks so .get() never triggers a NoneType error in the math engine
+        offset = next_offset
+
     return [
-        (point.payload.get("page_content", ""), point.payload.get("metadata", {}))
+        (point.payload.get("page_content"), point.payload.get("metadata"))
         for point in all_results
     ]
-
 
 # === Filters ===
 def flt(pid):
@@ -306,7 +284,6 @@ def format_food_intakes_docs(food_intake_res):
         for i, (doc, metadata) in enumerate(food_intake_res)
     ]
 
-# STANDBY - used by chat endpoints only
 # BUILD PROMPT
 def build_prompt_for_patient_docs(query, context):
     # Extract filenames from the context (assumes filenames are included in the context as part of the formatted data)
