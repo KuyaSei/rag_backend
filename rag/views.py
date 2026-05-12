@@ -415,7 +415,15 @@ class PatientFoodIntakeSummaryView(APIView):
 
             # Get relevant docs
             food_intake_res = get_patient_food_intake(pk, curdate,)
-            
+
+            if not food_intake_res:
+                return Response({
+                    "response": "No food intake records were recorded for this date.",
+                    "final_prompt": None,
+                    "food_intake_chunks": "",
+                    "date": curdate
+                }, status=status.HTTP_200_OK)
+
             food_intake_chunks = [
                 {
                     "result": i + 1,
@@ -425,7 +433,7 @@ class PatientFoodIntakeSummaryView(APIView):
                 for i, (doc, metadata) in enumerate(food_intake_res)
             ]
 
-            # Build context 
+            # Build context
             food_intake_context = "\n\n ".join([doc for doc, metadata in food_intake_res])
 
             # Build prompt
@@ -470,7 +478,16 @@ class PatientFoodIntakeSummaryByDateView(APIView):
 
             # Get relevant docs
             food_intake_res = get_patient_food_intake(pk, date)
-            
+
+            if not food_intake_res:
+                return Response({
+                    "response": "No food intake records were recorded for this date.",
+                    "final_prompt": None,
+                    "food_intake_chunks": "",
+                    "food_intake_res": [],
+                    "date": date
+                }, status=status.HTTP_200_OK)
+
             food_intake_chunks = [
                 {
                     "result": i + 1,
@@ -480,7 +497,7 @@ class PatientFoodIntakeSummaryByDateView(APIView):
                 for i, (doc, metadata) in enumerate(food_intake_res)
             ]
 
-            # Build context 
+            # Build context
             food_intake_context = "\n\n ".join([doc for doc, metadata in food_intake_res])
 
             # Build prompt

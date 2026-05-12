@@ -230,14 +230,68 @@ def preprocess_llm_response(raw):
     # 4. strip whitespace
     raw = raw.strip()
 
-    return json.loads(raw)
+    # 5. parse only the first valid JSON object — ignore any trailing text the LLM appended
+    obj, _ = json.JSONDecoder().raw_decode(raw)
+    return obj
+
+
+# ==================================
+# Nutritional Reference Tables
+# Source: USDA FoodData Central (fdc.nal.usda.gov) — cooked food values
+# Density values approximate cooked-state g/ml from food science literature
+# ==================================
+
+# Nutritional content per 100g (cooked)
+# USDA FoodData Central IDs: rice ~168878, chicken ~171534, broccoli ~170395,
+#                             egg ~172185, tofu ~172450
+NUTRITION_PER_100G = {
+    "rice":     {"calories_kcal": 130,  "protein_g": 2.4,  "fats_g": 0.3,  "carbohydrates_g": 28.1, "fiber_g": 0.4},
+    "chicken":  {"calories_kcal": 165,  "protein_g": 31.0, "fats_g": 3.6,  "carbohydrates_g": 0.0,  "fiber_g": 0.0},
+    "broccoli": {"calories_kcal":  28,  "protein_g": 2.4,  "fats_g": 0.3,  "carbohydrates_g": 5.8,  "fiber_g": 2.8},
+    "egg":      {"calories_kcal": 155,  "protein_g": 12.6, "fats_g": 11.0, "carbohydrates_g": 1.1,  "fiber_g": 0.0},
+    "tofu":     {"calories_kcal":  76,  "protein_g": 8.1,  "fats_g": 4.2,  "carbohydrates_g": 1.9,  "fiber_g": 0.3},
+}
+
+# Density in g/ml for cooked food items (used to convert YOLO volume → mass)
+DENSITY_G_PER_ML = {
+    "rice":     1.00,
+    "chicken":  0.85,
+    "broccoli": 0.80,
+    "egg":      1.05,
+    "tofu":     1.06,
+}
 
 
 def get_nutritional_content_in_json(formatted_intakes):
-    # [Exception Case]  formatted_intakes == None
-    if formatted_intakes == None:
+    if formatted_intakes is None:
         return {"calories_kcal": 0, "protein_g": 0, "fats_g": 0, "carbohydrates_g": 0, "fiber_g": 0}
 
+    totals = {"calories_kcal": 0.0, "protein_g": 0.0, "fats_g": 0.0, "carbohydrates_g": 0.0, "fiber_g": 0.0}
+
+    # Parse "X ml of food_class" entries from the formatted string
+    matches = re.findall(r'([\d.]+)\s*ml\s*of\s*(\w+)', formatted_intakes.lower())
+
+    unknown_items = []
+    for volume_str, food_class in matches:
+        volume_ml = float(volume_str)
+        if food_class in NUTRITION_PER_100G:
+            mass_g = volume_ml * DENSITY_G_PER_ML.get(food_class, 1.0)
+            for nutrient, per_100g in NUTRITION_PER_100G[food_class].items():
+                totals[nutrient] += (mass_g / 100.0) * per_100g
+        else:
+            unknown_items.append(f"{volume_str} ml of {food_class}")
+
+    # Fallback: LLM estimation for food classes not in the reference table
+    if unknown_items:
+        llm_result = _get_nutrition_from_llm(", ".join(unknown_items))
+        for nutrient in totals:
+            totals[nutrient] += llm_result.get(nutrient, 0)
+
+    return {k: round(v, 2) for k, v in totals.items()}
+
+
+def _get_nutrition_from_llm(formatted_intakes):
+    """LLM fallback for food items not covered by the reference table."""
     prompt = f"""Calculate the total calories, protein, fats, and carbohydrates in {formatted_intakes}.
 
 Return answers ONLY in JSON in this EXACT FORMAT:
@@ -249,11 +303,8 @@ Return answers ONLY in JSON in this EXACT FORMAT:
     "fiber_g": number,
 }}
 """
-
     raw = ask_llm(prompt)
-    preprocessed_res = preprocess_llm_response(raw)
-
-    return preprocessed_res
+    return preprocess_llm_response(raw)
 
 
 # Get patient DRIs' min and max range

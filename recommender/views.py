@@ -112,15 +112,21 @@ class DailyRecommendationsByPatientView(APIView):
 
             meal_names = meal_names_list  # get_list_of_meals()
             meals_text = ", ".join(meal_names)
+            food_intake_context = "\n".join([doc['document'] for doc in food_intake_docs])
 
             prompt = f"""
-You are a senior clinical dietitian evaluating a long-term care patient (Room {patient.get('room_number')}, Bed {patient.get('bed_number')}) for the date {curdate}.
+You are a dietary analysis assistant supporting the clinical care team for a long-term care patient (Room {patient.get('room_number')}, Bed {patient.get('bed_number')}) for the date {curdate}.
+This output is intended to assist qualified dietitians and does not replace professional medical judgment.
 
-You are provided with their actual calculated intake, mathematical remarks, and the official Taiwan HPA Guidelines.
+You are provided with their food intake records, calculated intake, mathematical remarks, and the official Taiwan HPA Guidelines.
 
 Patient Context:
 {get_patient_info(patient)}
-Actual Intake: {format_calculated_intakes(calculated_intake.get("aggregated_total", {}))}
+Food Intake Records (before/after meal scans — includes scale net weight and YOLO volume estimates):
+{food_intake_context}
+
+Calculated Intake (consumed: before minus after per food item):
+{format_calculated_intakes(calculated_intake.get("aggregated_total", {}))}
 Mathematical Remarks: {nutrition_remarks}
 
 HPA Guidelines Context:
@@ -273,13 +279,18 @@ class DailyRecommendationsByPatientAndDateView(APIView):
 
             # TRUE DUAL RAG PROMPT
             prompt = f"""
-You are a senior clinical dietitian evaluating a long-term care patient (Room {patient.get('room_number')}, Bed {patient.get('bed_number')}) for the date {curdate}.
+You are a dietary analysis assistant supporting the clinical care team for a long-term care patient (Room {patient.get('room_number')}, Bed {patient.get('bed_number')}) for the date {curdate}.
+This output is intended to assist qualified dietitians and does not replace professional medical judgment.
 
-You are provided with their actual calculated intake, mathematical remarks, and the official Taiwan HPA Guidelines. 
+You are provided with their food intake records, calculated intake, mathematical remarks, and the official Taiwan HPA Guidelines.
 
 Patient Context:
 {get_patient_info(patient)}
-Actual Intake: {format_calculated_intakes(calculated_intake.get("aggregated_total", {}))}
+Food Intake Records (before/after meal scans — includes scale net weight and YOLO volume estimates):
+{food_intake_context}
+
+Calculated Intake (consumed: before minus after per food item):
+{format_calculated_intakes(calculated_intake.get("aggregated_total", {}))}
 Mathematical Remarks: {nutrition_remarks}
 
 HPA Guidelines Context:
@@ -487,12 +498,14 @@ class WeeklyRecommendationsByPatientView(APIView):
             meals_text = ", ".join(meal_names)
 
             prompt = f"""
-You are a senior clinical dietitian evaluating a long-term care patient (Room {patient.get('room_number')}, Bed {patient.get('bed_number')}) for the past 7 days.
+You are a dietary analysis assistant supporting the clinical care team for a long-term care patient (Room {patient.get('room_number')}, Bed {patient.get('bed_number')}) for the past 7 days.
+This output is intended to assist qualified dietitians and does not replace professional medical judgment.
 
 You are provided with their 7-day accumulated total intake, mathematical remarks, and the official Taiwan HPA Guidelines.
 
 Patient Context:
 {get_patient_info(patient)}
+Note: Nutritional totals are derived from scale net weight measurements (before/after tray weighing) combined with YOLO food volume segmentation, accumulated over 7 days.
 Weekly Total Intake (7-day accumulated): {weekly_total_nutri_content}
 Mathematical Remarks: {weekly_nutrition_remarks}
 
@@ -530,12 +543,12 @@ Rules:
 - ONLY use meals from the Available Meals list.
 """
             try:
-                print(f"\n🔍 DEBUG: Calling ask_llm with prompt length: {len(prompt)}")
-                print(f"🔍 DEBUG: First 200 chars of prompt: {prompt[:200]}")
+                print(f"\nDEBUG: Calling ask_llm with prompt length: {len(prompt)}")
+                print(f"DEBUG: First 200 chars of prompt: {prompt[:200]}")
                 meal_recos = ask_llm(prompt)
-                print(f"✅ DEBUG: ask_llm successful! Response length: {len(meal_recos)}")
+                print(f"DEBUG: ask_llm successful! Response length: {len(meal_recos)}")
             except Exception as e:
-                print(f"\n❌ ERROR in ask_llm:")
+                print(f"\nERROR in ask_llm:")
                 print(f"Error type: {type(e).__name__}")
                 print(f"Error message: {str(e)}")
                 import traceback
@@ -544,13 +557,12 @@ Rules:
 
             
             # 5. FORMAT weekly_data FOR RESPONSE
-            for day_data in weekly_data.values():
-                day_data.pop("food_intake_docs", None)
 
 
             # 6. SEND RESPONSE
             response = {
                 "response": meal_recos,
+                "patient": patient,
                 "dates_list": dates_list,
                 "patient_dris": patient_dris,
                 "weekly_dri": weekly_dri,
@@ -767,12 +779,14 @@ class MonthlyRecommendationsByPatientView(APIView):
             meals_text = ", ".join(meal_names)
 
             prompt = f"""
-You are a senior clinical dietitian evaluating a long-term care patient (Room {patient.get('room_number')}, Bed {patient.get('bed_number')}) for the past 28 days.
+You are a dietary analysis assistant supporting the clinical care team for a long-term care patient (Room {patient.get('room_number')}, Bed {patient.get('bed_number')}) for the past 28 days.
+This output is intended to assist qualified dietitians and does not replace professional medical judgment.
 
 You are provided with their 28-day accumulated total intake, mathematical remarks, and the official Taiwan HPA Guidelines.
 
 Patient Context:
 {get_patient_info(patient)}
+Note: Nutritional totals are derived from scale net weight measurements (before/after tray weighing) combined with YOLO food volume segmentation, accumulated over 28 days.
 Monthly Total Intake (28-day accumulated): {monthly_total_nutri_content}
 Mathematical Remarks: {monthly_nutrition_remarks}
 
@@ -813,13 +827,12 @@ Rules:
 
             
             # 5. FORMAT monthly_data FOR RESPONSE
-            for day_data in monthly_data.values():
-                day_data.pop("food_intake_docs", None)
 
 
             # 6. SEND RESPONSE
             response = {
                 "response": meal_recos,
+                "patient": patient,
                 "dates_list": dates_list,
                 "patient_dris": patient_dris,
                 "monthly_dri": monthly_dri,
@@ -885,6 +898,7 @@ class WeeklyTrendByPatientView(APIView):
             nutrients = ["calories_kcal", "protein_g", "fats_g", "carbohydrates_g", "fiber_g"]
             datasets = {n: [] for n in nutrients}
             remarks_by_day = {}
+            food_intake_docs_by_date = {}
 
             for date in dates:
                 intake_results = get_patient_segmented_intake(pk, date)
@@ -902,6 +916,7 @@ class WeeklyTrendByPatientView(APIView):
                 for n in nutrients:
                     datasets[n].append(day_total[n])
                 remarks_by_day[date] = day_remarks
+                food_intake_docs_by_date[date] = food_intake_docs
 
             # 7-day totals
             total = {n: round(sum(datasets[n]), 2) for n in nutrients}
@@ -914,6 +929,7 @@ class WeeklyTrendByPatientView(APIView):
                 "dates": dates,
                 "datasets": datasets,
                 "remarks_by_day": remarks_by_day,
+                "food_intake_docs_by_date": food_intake_docs_by_date,
                 "total": total,
                 "daily_dri": daily_dri,
                 "weekly_dri": weekly_dri,
@@ -960,6 +976,7 @@ class MonthlyTrendByPatientView(APIView):
             nutrients = ["calories_kcal", "protein_g", "fats_g", "carbohydrates_g", "fiber_g"]
             datasets = {n: [] for n in nutrients}
             remarks_by_day = {}
+            food_intake_docs_by_date = {}
 
             for date in dates:
                 intake_results = get_patient_segmented_intake(pk, date)
@@ -977,6 +994,7 @@ class MonthlyTrendByPatientView(APIView):
                 for n in nutrients:
                     datasets[n].append(day_total[n])
                 remarks_by_day[date] = day_remarks
+                food_intake_docs_by_date[date] = food_intake_docs
 
             # 28-day totals
             total = {n: round(sum(datasets[n]), 2) for n in nutrients}
@@ -989,6 +1007,7 @@ class MonthlyTrendByPatientView(APIView):
                 "dates": dates,
                 "datasets": datasets,
                 "remarks_by_day": remarks_by_day,
+                "food_intake_docs_by_date": food_intake_docs_by_date,
                 "total": total,
                 "daily_dri": daily_dri,
                 "monthly_dri": monthly_dri,
@@ -997,6 +1016,510 @@ class MonthlyTrendByPatientView(APIView):
 
         except Exception as e:
             return Response({"detail": "Error generating trend data", "error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ClusteredDailyRecommendationsByPatientView(APIView):
+    """Daily recommendation using a K-Means cluster-filtered meal list."""
+    def post(self, request, pk):
+        try:
+            curdate = request.data.get('date')
+            if not curdate:
+                return Response({"detail": "date is required in the request body."}, status=status.HTTP_400_BAD_REQUEST)
+
+            meal_names = request.data.get('meal_list', meal_names_list)
+            cluster_id = request.data.get('cluster_id', None)
+            cluster_label = request.data.get('cluster_label', '')
+
+            # 1. INFORMATION RETRIEVAL
+            patient_profile = get_patient_profile(pk)
+            if not patient_profile:
+                return Response({"detail": f"Patient {pk} not found in the system."}, status=status.HTTP_404_NOT_FOUND)
+            patient = patient_profile[0][1]
+
+            dietary_targets = get_patient_dietary_targets(pk)
+            if not dietary_targets:
+                return Response({"detail": f"No dietary targets found for patient {pk}."}, status=status.HTTP_404_NOT_FOUND)
+            raw_dris = dietary_targets[0][1]
+            patient_dris = {
+                "calories_kcal": get_dri_min_max(raw_dris["dri_calories"]),
+                "protein_g": get_dri_min_max(raw_dris["dri_protein"]),
+                "fats_g": get_dri_min_max(raw_dris["dri_fat"]),
+                "carbohydrates_g": get_dri_min_max(raw_dris["dri_carbohydrate"]),
+                "fiber_g": get_dri_min_max(raw_dris["dri_fiber"]),
+            }
+
+            food_intake_results = get_patient_segmented_intake(pk, curdate)
+            food_intake_docs = format_food_intakes_docs(food_intake_results)
+
+            # 2. FOOD VOLUME -> NUTRITIONAL CONTENT
+            calculated_intake = calculate_food_item_intake(food_intake_docs, debug=True)
+
+            lunch_intakes = calculated_intake['by_meal'].get('lunch')
+            formatted_lunch_intakes = format_calculated_intakes(lunch_intakes) if lunch_intakes else None
+            lunch_items = format_calculated_intakes_for_response(lunch_intakes) if lunch_intakes else None
+
+            dinner_intakes = calculated_intake['by_meal'].get('dinner')
+            formatted_dinner_intakes = format_calculated_intakes(dinner_intakes) if dinner_intakes else None
+            dinner_items = format_calculated_intakes_for_response(dinner_intakes) if dinner_intakes else None
+
+            lunch_nutri_content = get_nutritional_content_in_json(formatted_lunch_intakes)
+            dinner_nutri_content = get_nutritional_content_in_json(formatted_dinner_intakes)
+
+            total_nutri_content = {
+                "calories_kcal": lunch_nutri_content["calories_kcal"] + dinner_nutri_content["calories_kcal"],
+                "protein_g": lunch_nutri_content["protein_g"] + dinner_nutri_content["protein_g"],
+                "fats_g": lunch_nutri_content["fats_g"] + dinner_nutri_content["fats_g"],
+                "carbohydrates_g": lunch_nutri_content["carbohydrates_g"] + dinner_nutri_content["carbohydrates_g"],
+                "fiber_g": lunch_nutri_content["fiber_g"] + dinner_nutri_content["fiber_g"],
+            }
+
+            nutrition_remarks = {
+                "protein_g": get_nutrition_remarks(patient_dris, total_nutri_content, nutrient="protein_g"),
+                "fats_g": get_nutrition_remarks(patient_dris, total_nutri_content, nutrient="fats_g"),
+                "carbohydrates_g": get_nutrition_remarks(patient_dris, total_nutri_content, nutrient="carbohydrates_g"),
+                "fiber_g": get_nutrition_remarks(patient_dris, total_nutri_content, nutrient="fiber_g"),
+                "calories_kcal": get_nutrition_remarks(patient_dris, total_nutri_content, nutrient="calories_kcal"),
+            }
+
+            # 3. DUAL RAG: HPA DOCS RETRIEVAL & LLM GENERATION
+            age = patient.get("age")
+            sex = patient.get("sex")
+            if not age and not sex:
+                descriptor = "高齡長者"
+            elif age and sex:
+                descriptor = f"{age}歲的{sex}"
+            elif age:
+                descriptor = f"{age}歲"
+            else:
+                descriptor = sex
+
+            query_1_results = retrieve_all(f"{descriptor}的每日蛋白質攝取建議與需求", top_k=3)
+            query_2_results = retrieve_all(f"{descriptor}的每日碳水化合物攝取建議與需求", top_k=3)
+            query_3_results = retrieve_all(f"{descriptor}的每日脂質攝取建議與需求", top_k=3)
+            query_4_results = retrieve_all(f"{descriptor}的每日熱量(Calories)攝取建議與需求", top_k=3)
+            query_5_results = retrieve_all(f"{descriptor}的每日膳食纖維(Fiber)攝取建議與需求", top_k=3)
+
+            meals_text = ", ".join(meal_names)
+            cluster_header = f"Assigned Meals — K-Means Cluster {cluster_id}: {cluster_label}:" if cluster_label else "Assigned Meals:"
+            food_intake_context = "\n".join([doc['document'] for doc in food_intake_docs])
+
+            prompt = f"""
+You are a dietary analysis assistant supporting the clinical care team for a long-term care patient (Room {patient.get('room_number')}, Bed {patient.get('bed_number')}) for the date {curdate}.
+This output is intended to assist qualified dietitians and does not replace professional medical judgment.
+
+You are provided with their food intake records, calculated intake, mathematical remarks, and the official Taiwan HPA Guidelines.
+
+Patient Context:
+{get_patient_info(patient)}
+Food Intake Records (before/after meal scans — includes scale net weight and YOLO volume estimates):
+{food_intake_context}
+
+Calculated Intake (consumed: before minus after per food item):
+{format_calculated_intakes(calculated_intake.get("aggregated_total", {}))}
+Mathematical Remarks: {nutrition_remarks}
+
+HPA Guidelines Context:
+Protein: {build_rag_context(query_1_results)}
+Carbohydrates: {build_rag_context(query_2_results)}
+Lipids/Fats: {build_rag_context(query_3_results)}
+Calories: {build_rag_context(query_4_results)}
+Fiber: {build_rag_context(query_5_results)}
+
+{cluster_header}
+{meals_text}
+{"These meals were assigned to the patient and grouped under the above cluster based on their nutritional profile." if cluster_label else ""}
+
+TASK:
+You MUST format your response EXACTLY according to the following structure. Do not deviate. Answer in English.
+
+AI Dietary Analysis:
+(Write 2-3 sentences analyzing the patient's nutritional status using the Mathematical Remarks and HPA Guidelines. Reference specific HPA thresholds for this patient's age and sex. Explain what is deficient or excessive clinically.)
+
+Cluster Justification (K-Means Cluster: {cluster_label}):
+(For EACH meal in the Assigned Meals list above, provide 1-sentence clinical reasoning grounded in the HPA Guidelines Context explaining why it is appropriate for this patient's nutritional needs.)
+1. [Meal Name in Chinese] ([Meal Name translated to English]) - [HPA-grounded clinical reason]
+2. [Meal Name in Chinese] ([Meal Name translated to English]) - [HPA-grounded clinical reason]
+(continue for all meals listed)
+
+Reference Sources (HPA Guidelines):
+(List 2-3 specific rules from the 'HPA Guidelines Context' that support your justification. You MUST extract and print the exact '(Source: [filename])' tag. You MUST use the exact numbers from the text. Do not invent ranges.)
+- [Specific Rule with EXACT numbers from context] - (Source: [Exact Document Name.pdf])
+- [Specific Rule with EXACT numbers from context] - (Source: [Exact Document Name.pdf])
+
+Rules:
+- If there is no food intake record for {curdate}, output ONLY: "Dietary recommendations cannot be provided because no intake was recorded for this day."
+- Justify ALL meals listed in the Assigned Meals section — do not skip any.
+- ONLY reference HPA Guidelines from the provided context.
+"""
+            meal_recommendations = ask_llm(prompt)
+
+            return Response({
+                "response": meal_recommendations,
+                "date": curdate,
+                "cluster_id": cluster_id,
+                "cluster_label": cluster_label,
+                "patient": patient,
+                "patient_dris": patient_dris,
+                "food_intake_docs": food_intake_docs,
+                "lunch_items": lunch_items,
+                "lunch_nutritional_content": lunch_nutri_content,
+                "dinner_items": dinner_items,
+                "dinner_nutritional_content": dinner_nutri_content,
+                "total_nutritional_content": total_nutri_content,
+                "daily_nutrition_remarks": nutrition_remarks,
+                "prompt": prompt,
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"detail": "Error generating response", "error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ClusteredWeeklyRecommendationsByPatientView(APIView):
+    """Weekly recommendation using a K-Means cluster-filtered meal list for explainability."""
+    def post(self, request, pk):
+        try:
+            meal_names = request.data.get('meal_list', meal_names_list)
+            cluster_id = request.data.get('cluster_id', None)
+            cluster_label = request.data.get('cluster_label', '')
+
+            # 1. INFORMATION RETRIEVAL
+            patient_profile = get_patient_profile(pk)
+            if not patient_profile:
+                return Response({"detail": f"Patient {pk} not found in the system."}, status=status.HTTP_404_NOT_FOUND)
+            patient = patient_profile[0][1]
+
+            dietary_targets = get_patient_dietary_targets(pk)
+            if not dietary_targets:
+                return Response({"detail": f"No dietary targets found for patient {pk}."}, status=status.HTTP_404_NOT_FOUND)
+            patient_dris = dietary_targets[0][1]
+            patient_dris = {
+                "calories_kcal": get_dri_min_max(patient_dris["dri_calories"]),
+                "protein_g": get_dri_min_max(patient_dris["dri_protein"]),
+                "fats_g": get_dri_min_max(patient_dris["dri_fat"]),
+                "carbohydrates_g": get_dri_min_max(patient_dris["dri_carbohydrate"]),
+                "fiber_g": get_dri_min_max(patient_dris["dri_fiber"]),
+            }
+            weekly_dri = {
+                nutrient: {"min": round(val["min"] * 7, 2), "max": round(val["max"] * 7, 2)}
+                for nutrient, val in patient_dris.items()
+            }
+
+            requested_date = request.data.get('date')
+            curdate = datetime.strptime(requested_date, "%Y-%m-%d").date() if requested_date else datetime.now(ZoneInfo("Asia/Taipei")).date()
+            dates_list = [(curdate - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+
+            weekly_data = {}
+            for i, date in enumerate(dates_list):
+                intake_results = get_patient_segmented_intake(pk, date)
+                food_intake_docs = format_food_intakes_docs(intake_results)
+                weekly_data[7 - i] = {"date": date, "food_intake_docs": food_intake_docs}
+
+            # 2. FOOD VOLUME -> NUTRITIONAL CONTENT
+            for day_data in weekly_data.values():
+                food_intake_docs = day_data["food_intake_docs"]
+                calculated_intake = calculate_food_item_intake(food_intake_docs, debug=True)
+                lunch_intakes = calculated_intake['by_meal'].get('lunch')
+                dinner_intakes = calculated_intake['by_meal'].get('dinner')
+                lunch_nutri_content = get_nutritional_content_in_json(format_calculated_intakes(lunch_intakes) if lunch_intakes else None)
+                dinner_nutri_content = get_nutritional_content_in_json(format_calculated_intakes(dinner_intakes) if dinner_intakes else None)
+                total_nutri_content = {
+                    "calories_kcal": lunch_nutri_content["calories_kcal"] + dinner_nutri_content["calories_kcal"],
+                    "protein_g": lunch_nutri_content["protein_g"] + dinner_nutri_content["protein_g"],
+                    "fats_g": lunch_nutri_content["fats_g"] + dinner_nutri_content["fats_g"],
+                    "carbohydrates_g": lunch_nutri_content["carbohydrates_g"] + dinner_nutri_content["carbohydrates_g"],
+                    "fiber_g": lunch_nutri_content["fiber_g"] + dinner_nutri_content["fiber_g"],
+                }
+                nutrition_remarks = {
+                    "protein_g": get_nutrition_remarks(patient_dris, total_nutri_content, nutrient="protein_g"),
+                    "fats_g": get_nutrition_remarks(patient_dris, total_nutri_content, nutrient="fats_g"),
+                    "carbohydrates_g": get_nutrition_remarks(patient_dris, total_nutri_content, nutrient="carbohydrates_g"),
+                    "fiber_g": get_nutrition_remarks(patient_dris, total_nutri_content, nutrient="fiber_g"),
+                    "calories_kcal": get_nutrition_remarks(patient_dris, total_nutri_content, nutrient="calories_kcal"),
+                }
+                day_data["lunch_items"] = format_calculated_intakes_for_response(lunch_intakes) if lunch_intakes else None
+                day_data["lunch_nutritional_content"] = lunch_nutri_content
+                day_data["dinner_items"] = format_calculated_intakes_for_response(dinner_intakes) if dinner_intakes else None
+                day_data["dinner_nutritional_content"] = dinner_nutri_content
+                day_data["total_nutritional_content"] = total_nutri_content
+                day_data["daily_nutrition_remarks"] = nutrition_remarks
+
+            # 3. WEEKLY TOTAL
+            weekly_total_nutri_content = {
+                "calories_kcal": round(sum(d["total_nutritional_content"]["calories_kcal"] for d in weekly_data.values()), 2),
+                "protein_g": round(sum(d["total_nutritional_content"]["protein_g"] for d in weekly_data.values()), 2),
+                "fats_g": round(sum(d["total_nutritional_content"]["fats_g"] for d in weekly_data.values()), 2),
+                "carbohydrates_g": round(sum(d["total_nutritional_content"]["carbohydrates_g"] for d in weekly_data.values()), 2),
+                "fiber_g": round(sum(d["total_nutritional_content"]["fiber_g"] for d in weekly_data.values()), 2),
+            }
+            weekly_nutrition_remarks = {
+                "protein_g": get_nutrition_remarks(weekly_dri, weekly_total_nutri_content, nutrient="protein_g"),
+                "fats_g": get_nutrition_remarks(weekly_dri, weekly_total_nutri_content, nutrient="fats_g"),
+                "carbohydrates_g": get_nutrition_remarks(weekly_dri, weekly_total_nutri_content, nutrient="carbohydrates_g"),
+                "fiber_g": get_nutrition_remarks(weekly_dri, weekly_total_nutri_content, nutrient="fiber_g"),
+                "calories_kcal": get_nutrition_remarks(weekly_dri, weekly_total_nutri_content, nutrient="calories_kcal"),
+            }
+
+            # 4. DUAL RAG + LLM
+            age = patient.get("age")
+            sex = patient.get("sex")
+            descriptor = f"{age}歲的{sex}" if age and sex else (f"{age}歲" if age else (sex if sex else "高齡長者"))
+            query_1_results = retrieve_all(f"{descriptor}的每日蛋白質攝取建議與需求", top_k=3)
+            query_2_results = retrieve_all(f"{descriptor}的每日碳水化合物攝取建議與需求", top_k=3)
+            query_3_results = retrieve_all(f"{descriptor}的每日脂質攝取建議與需求", top_k=3)
+            query_4_results = retrieve_all(f"{descriptor}的每日熱量(Calories)攝取建議與需求", top_k=3)
+            query_5_results = retrieve_all(f"{descriptor}的每日膳食纖維(Fiber)攝取建議與需求", top_k=3)
+
+            meals_text = ", ".join(meal_names)
+            cluster_header = f"Assigned Meals — K-Means Cluster {cluster_id}: {cluster_label}:" if cluster_label else "Assigned Meals:"
+
+            prompt = f"""
+You are a dietary analysis assistant supporting the clinical care team for a long-term care patient (Room {patient.get('room_number')}, Bed {patient.get('bed_number')}) for the past 7 days.
+This output is intended to assist qualified dietitians and does not replace professional medical judgment.
+
+You are provided with their 7-day accumulated total intake, mathematical remarks, and the official Taiwan HPA Guidelines.
+
+Patient Context:
+{get_patient_info(patient)}
+Note: Nutritional totals are derived from scale net weight measurements (before/after tray weighing) combined with YOLO food volume segmentation, accumulated over 7 days.
+Weekly Total Intake (7-day accumulated): {weekly_total_nutri_content}
+Mathematical Remarks: {weekly_nutrition_remarks}
+
+HPA Guidelines Context:
+Protein: {build_rag_context(query_1_results)}
+Carbohydrates: {build_rag_context(query_2_results)}
+Lipids/Fats: {build_rag_context(query_3_results)}
+Calories: {build_rag_context(query_4_results)}
+Fiber: {build_rag_context(query_5_results)}
+
+{cluster_header}
+{meals_text}
+{"These meals were assigned to the patient and grouped under the above cluster based on their nutritional profile." if cluster_label else ""}
+
+TASK:
+You MUST format your response EXACTLY according to the following structure. Do not deviate. Answer in English.
+
+AI Dietary Analysis:
+(Write 2-3 sentences analyzing the patient's nutritional status using the Mathematical Remarks and HPA Guidelines. Reference specific HPA thresholds for this patient's age and sex. Explain what is deficient or excessive clinically based on the 7-day accumulated total.)
+
+Cluster Justification (K-Means Cluster: {cluster_label}):
+(For EACH meal in the Assigned Meals list above, provide 1-sentence clinical reasoning grounded in the HPA Guidelines Context explaining why it is appropriate for this patient's nutritional needs.)
+1. [Meal Name in Chinese] ([Meal Name translated to English]) - [HPA-grounded clinical reason]
+2. [Meal Name in Chinese] ([Meal Name translated to English]) - [HPA-grounded clinical reason]
+(continue for all meals listed)
+
+Reference Sources (HPA Guidelines):
+(List 2-3 specific rules from the 'HPA Guidelines Context' that support your justification. You MUST extract and print the exact '(Source: [filename])' tag. You MUST use the exact numbers from the text. Do not invent ranges.)
+- [Specific Rule with EXACT numbers from context] - (Source: [Exact Document Name.pdf])
+- [Specific Rule with EXACT numbers from context] - (Source: [Exact Document Name.pdf])
+
+Rules:
+- If there are no food intake records for the past 7 days, output ONLY: "Dietary recommendations cannot be provided because no intake was recorded for this period."
+- Justify ALL meals listed in the Assigned Meals section — do not skip any.
+- ONLY reference HPA Guidelines from the provided context.
+"""
+            meal_recos = ask_llm(prompt)
+
+            return Response({
+                "response": meal_recos,
+                "cluster_id": cluster_id,
+                "cluster_label": cluster_label,
+                "patient": patient,
+                "dates_list": dates_list,
+                "patient_dris": patient_dris,
+                "weekly_dri": weekly_dri,
+                "weekly_data": weekly_data,
+                "weekly_total_nutritional_content": weekly_total_nutri_content,
+                "weekly_nutrition_remarks": weekly_nutrition_remarks,
+                "prompt": prompt,
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"detail": "Error generating response", "error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class ClusteredMonthlyRecommendationsByPatientView(APIView):
+    """Monthly recommendation using a K-Means cluster-filtered meal list for explainability."""
+    def post(self, request, pk):
+        try:
+            meal_names = request.data.get('meal_list', meal_names_list)
+            cluster_id = request.data.get('cluster_id', None)
+            cluster_label = request.data.get('cluster_label', '')
+
+            # 1. INFORMATION RETRIEVAL
+            patient_profile = get_patient_profile(pk)
+            if not patient_profile:
+                return Response({"detail": f"Patient {pk} not found in the system."}, status=status.HTTP_404_NOT_FOUND)
+            patient = patient_profile[0][1]
+
+            dietary_targets = get_patient_dietary_targets(pk)
+            if not dietary_targets:
+                return Response({"detail": f"No dietary targets found for patient {pk}."}, status=status.HTTP_404_NOT_FOUND)
+            patient_dris = dietary_targets[0][1]
+            patient_dris = {
+                "calories_kcal": get_dri_min_max(patient_dris["dri_calories"]),
+                "protein_g": get_dri_min_max(patient_dris["dri_protein"]),
+                "fats_g": get_dri_min_max(patient_dris["dri_fat"]),
+                "carbohydrates_g": get_dri_min_max(patient_dris["dri_carbohydrate"]),
+                "fiber_g": get_dri_min_max(patient_dris["dri_fiber"]),
+            }
+            weekly_dri = {
+                nutrient: {"min": round(val["min"] * 7, 2), "max": round(val["max"] * 7, 2)}
+                for nutrient, val in patient_dris.items()
+            }
+            monthly_dri = {
+                nutrient: {"min": round(val["min"] * 28, 2), "max": round(val["max"] * 28, 2)}
+                for nutrient, val in patient_dris.items()
+            }
+
+            requested_date = request.data.get('date')
+            curdate = datetime.strptime(requested_date, "%Y-%m-%d").date() if requested_date else datetime.now(ZoneInfo("Asia/Taipei")).date()
+            TOTAL_DAYS = 28
+            dates_list = [(curdate - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(TOTAL_DAYS)]
+
+            monthly_data = {}
+            for i, date in enumerate(dates_list):
+                intake_results = get_patient_segmented_intake(pk, date)
+                food_intake_docs = format_food_intakes_docs(intake_results)
+                monthly_data[TOTAL_DAYS - i] = {"date": date, "food_intake_docs": food_intake_docs}
+
+            # 2. FOOD VOLUME -> NUTRITIONAL CONTENT
+            for day_data in monthly_data.values():
+                food_intake_docs = day_data["food_intake_docs"]
+                calculated_intake = calculate_food_item_intake(food_intake_docs, debug=True)
+                lunch_intakes = calculated_intake['by_meal'].get('lunch')
+                dinner_intakes = calculated_intake['by_meal'].get('dinner')
+                lunch_nutri_content = get_nutritional_content_in_json(format_calculated_intakes(lunch_intakes) if lunch_intakes else None)
+                dinner_nutri_content = get_nutritional_content_in_json(format_calculated_intakes(dinner_intakes) if dinner_intakes else None)
+                total_nutri_content = {
+                    "calories_kcal": lunch_nutri_content["calories_kcal"] + dinner_nutri_content["calories_kcal"],
+                    "protein_g": lunch_nutri_content["protein_g"] + dinner_nutri_content["protein_g"],
+                    "fats_g": lunch_nutri_content["fats_g"] + dinner_nutri_content["fats_g"],
+                    "carbohydrates_g": lunch_nutri_content["carbohydrates_g"] + dinner_nutri_content["carbohydrates_g"],
+                    "fiber_g": lunch_nutri_content["fiber_g"] + dinner_nutri_content["fiber_g"],
+                }
+                nutrition_remarks = {
+                    "protein_g": get_nutrition_remarks(patient_dris, total_nutri_content, nutrient="protein_g"),
+                    "fats_g": get_nutrition_remarks(patient_dris, total_nutri_content, nutrient="fats_g"),
+                    "carbohydrates_g": get_nutrition_remarks(patient_dris, total_nutri_content, nutrient="carbohydrates_g"),
+                    "fiber_g": get_nutrition_remarks(patient_dris, total_nutri_content, nutrient="fiber_g"),
+                    "calories_kcal": get_nutrition_remarks(patient_dris, total_nutri_content, nutrient="calories_kcal"),
+                }
+                day_data["lunch_items"] = format_calculated_intakes_for_response(lunch_intakes) if lunch_intakes else None
+                day_data["lunch_nutritional_content"] = lunch_nutri_content
+                day_data["dinner_items"] = format_calculated_intakes_for_response(dinner_intakes) if dinner_intakes else None
+                day_data["dinner_nutritional_content"] = dinner_nutri_content
+                day_data["total_nutritional_content"] = total_nutri_content
+                day_data["daily_nutrition_remarks"] = nutrition_remarks
+
+            # 3. WEEKLY + MONTHLY TOTALS
+            monthly_list = list(monthly_data.values())
+            monthly_list.reverse()
+            weeks = [monthly_list[i:i+7] for i in range(0, len(monthly_list), 7)]
+            weekly_data = {}
+            for i, week in enumerate(weeks, start=1):
+                wk_total = {
+                    "calories_kcal": round(sum(d["total_nutritional_content"]["calories_kcal"] for d in week), 2),
+                    "protein_g": round(sum(d["total_nutritional_content"]["protein_g"] for d in week), 2),
+                    "fats_g": round(sum(d["total_nutritional_content"]["fats_g"] for d in week), 2),
+                    "carbohydrates_g": round(sum(d["total_nutritional_content"]["carbohydrates_g"] for d in week), 2),
+                    "fiber_g": round(sum(d["total_nutritional_content"]["fiber_g"] for d in week), 2),
+                }
+                weekly_data[i] = {
+                    "weekly_total_nutritional_content": wk_total,
+                    "weekly_nutrition_remarks": {
+                        n: get_nutrition_remarks(weekly_dri, wk_total, nutrient=n)
+                        for n in ["protein_g", "fats_g", "carbohydrates_g", "fiber_g", "calories_kcal"]
+                    }
+                }
+            monthly_total_nutri_content = {
+                "calories_kcal": round(sum(w["weekly_total_nutritional_content"]["calories_kcal"] for w in weekly_data.values()), 2),
+                "protein_g": round(sum(w["weekly_total_nutritional_content"]["protein_g"] for w in weekly_data.values()), 2),
+                "fats_g": round(sum(w["weekly_total_nutritional_content"]["fats_g"] for w in weekly_data.values()), 2),
+                "carbohydrates_g": round(sum(w["weekly_total_nutritional_content"]["carbohydrates_g"] for w in weekly_data.values()), 2),
+                "fiber_g": round(sum(w["weekly_total_nutritional_content"]["fiber_g"] for w in weekly_data.values()), 2),
+            }
+            monthly_nutrition_remarks = {
+                n: get_nutrition_remarks(monthly_dri, monthly_total_nutri_content, nutrient=n)
+                for n in ["protein_g", "fats_g", "carbohydrates_g", "fiber_g", "calories_kcal"]
+            }
+
+            # 4. DUAL RAG + LLM
+            age = patient.get("age")
+            sex = patient.get("sex")
+            descriptor = f"{age}歲的{sex}" if age and sex else (f"{age}歲" if age else (sex if sex else "高齡長者"))
+            query_1_results = retrieve_all(f"{descriptor}的每日蛋白質攝取建議與需求", top_k=3)
+            query_2_results = retrieve_all(f"{descriptor}的每日碳水化合物攝取建議與需求", top_k=3)
+            query_3_results = retrieve_all(f"{descriptor}的每日脂質攝取建議與需求", top_k=3)
+            query_4_results = retrieve_all(f"{descriptor}的每日熱量(Calories)攝取建議與需求", top_k=3)
+            query_5_results = retrieve_all(f"{descriptor}的每日膳食纖維(Fiber)攝取建議與需求", top_k=3)
+
+            meals_text = ", ".join(meal_names)
+            cluster_header = f"Assigned Meals — K-Means Cluster {cluster_id}: {cluster_label}:" if cluster_label else "Assigned Meals:"
+
+            prompt = f"""
+You are a dietary analysis assistant supporting the clinical care team for a long-term care patient (Room {patient.get('room_number')}, Bed {patient.get('bed_number')}) for the past 28 days.
+This output is intended to assist qualified dietitians and does not replace professional medical judgment.
+
+You are provided with their 28-day accumulated total intake, mathematical remarks, and the official Taiwan HPA Guidelines.
+
+Patient Context:
+{get_patient_info(patient)}
+Note: Nutritional totals are derived from scale net weight measurements (before/after tray weighing) combined with YOLO food volume segmentation, accumulated over 28 days.
+Monthly Total Intake (28-day accumulated): {monthly_total_nutri_content}
+Mathematical Remarks: {monthly_nutrition_remarks}
+
+HPA Guidelines Context:
+Protein: {build_rag_context(query_1_results)}
+Carbohydrates: {build_rag_context(query_2_results)}
+Lipids/Fats: {build_rag_context(query_3_results)}
+Calories: {build_rag_context(query_4_results)}
+Fiber: {build_rag_context(query_5_results)}
+
+{cluster_header}
+{meals_text}
+{"These meals were assigned to the patient and grouped under the above cluster based on their nutritional profile." if cluster_label else ""}
+
+TASK:
+You MUST format your response EXACTLY according to the following structure. Do not deviate. Answer in English.
+
+AI Dietary Analysis:
+(Write 2-3 sentences analyzing the patient's nutritional status using the Mathematical Remarks and HPA Guidelines. Reference specific HPA thresholds for this patient's age and sex. Explain what is deficient or excessive clinically based on the 28-day accumulated total.)
+
+Cluster Justification (K-Means Cluster: {cluster_label}):
+(For EACH meal in the Assigned Meals list above, provide 1-sentence clinical reasoning grounded in the HPA Guidelines Context explaining why it is appropriate for this patient's nutritional needs.)
+1. [Meal Name in Chinese] ([Meal Name translated to English]) - [HPA-grounded clinical reason]
+2. [Meal Name in Chinese] ([Meal Name translated to English]) - [HPA-grounded clinical reason]
+(continue for all meals listed)
+
+Reference Sources (HPA Guidelines):
+(List 2-3 specific rules from the 'HPA Guidelines Context' that support your justification. You MUST extract and print the exact '(Source: [filename])' tag. You MUST use the exact numbers from the text. Do not invent ranges.)
+- [Specific Rule with EXACT numbers from context] - (Source: [Exact Document Name.pdf])
+- [Specific Rule with EXACT numbers from context] - (Source: [Exact Document Name.pdf])
+
+Rules:
+- If there are no food intake records for the past 28 days, output ONLY: "Dietary recommendations cannot be provided because no intake was recorded for this period."
+- Justify ALL meals listed in the Assigned Meals section — do not skip any.
+- ONLY reference HPA Guidelines from the provided context.
+"""
+            meal_recos = ask_llm(prompt)
+
+            return Response({
+                "response": meal_recos,
+                "cluster_id": cluster_id,
+                "cluster_label": cluster_label,
+                "patient": patient,
+                "dates_list": dates_list,
+                "patient_dris": patient_dris,
+                "monthly_dri": monthly_dri,
+                "monthly_data": monthly_data,
+                "weekly_data": weekly_data,
+                "monthly_total_nutritional_content": monthly_total_nutri_content,
+                "monthly_nutrition_remarks": monthly_nutrition_remarks,
+                "prompt": prompt,
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"detail": "Error generating response", "error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 # From actual db
