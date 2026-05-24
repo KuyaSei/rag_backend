@@ -269,6 +269,46 @@ def si_flt(pid, date_str: str):
     )
 
 
+def si_all_flt(pid):
+    """Filter for ALL segmented_intake docs of a patient — no date restriction."""
+    return Filter(
+        must=[
+            FieldCondition(
+                key="metadata.doc_type",
+                match=MatchValue(value="segmented_intake")
+            ),
+            FieldCondition(
+                key="metadata.ltc_patient_id",
+                match=MatchValue(value=pid)
+            ),
+        ]
+    )
+
+
+def get_all_patient_segmented_intakes(pid, limit_per_scroll=100):
+    """Retrieve ALL segmented_intake docs for a patient regardless of date."""
+    COLLECTION_NAME = "ltc_semantic_graph_2"
+    all_results = []
+    offset = None
+
+    while True:
+        scroll_result, next_offset = qd_client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=si_all_flt(pid),
+            limit=limit_per_scroll,
+            offset=offset,
+        )
+        all_results.extend(scroll_result)
+        if next_offset is None:
+            break
+        offset = next_offset
+
+    return [
+        (point.payload.get("page_content"), point.payload.get("metadata"))
+        for point in all_results
+    ]
+
+
 # ==================================
 # Build Prompt
 # ==================================

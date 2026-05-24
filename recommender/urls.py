@@ -9,6 +9,10 @@ from .views import (
     ClusteredDailyRecommendationsByPatientView,
     ClusteredWeeklyRecommendationsByPatientView,
     ClusteredMonthlyRecommendationsByPatientView,
+    PatientMacroSummaryView,
+    KnnJustifiedRecommendationView,
+    KnnJustifiedWeeklyView,
+    KnnJustifiedMonthlyView,
 )
 
 # BASE ENDPOINT: /api/recommend/
@@ -49,6 +53,22 @@ urlpatterns = [
     # Monthly trend data (no LLM — for chart)
     path("nutri-and-food/patient/<int:pk>/monthly/trend", MonthlyTrendByPatientView.as_view()),
     path("nutri-and-food/patient/<int:pk>/monthly/trend/", MonthlyTrendByPatientView.as_view()),
+
+    # Lightweight macro summary for KNN (no LLM — daily/weekly/monthly via ?period=&date=)
+    path("nutri-and-food/patient/<int:pk>/macro-summary", PatientMacroSummaryView.as_view()),
+    path("nutri-and-food/patient/<int:pk>/macro-summary/", PatientMacroSummaryView.as_view()),
+
+    # KNN (Alex) + LLM clinical justification — calls Alex's KNN then layers HPA RAG on top
+    path("nutri-and-food/patient/<int:pk>/knn-justified", KnnJustifiedRecommendationView.as_view()),
+    path("nutri-and-food/patient/<int:pk>/knn-justified/", KnnJustifiedRecommendationView.as_view()),
+
+    # KNN justified — weekly (7-day nutrition table + KNN period=week)
+    path("nutri-and-food/patient/<int:pk>/knn-justified/weekly", KnnJustifiedWeeklyView.as_view()),
+    path("nutri-and-food/patient/<int:pk>/knn-justified/weekly/", KnnJustifiedWeeklyView.as_view()),
+
+    # KNN justified — monthly (28-day nutrition table + KNN period=month)
+    path("nutri-and-food/patient/<int:pk>/knn-justified/monthly", KnnJustifiedMonthlyView.as_view()),
+    path("nutri-and-food/patient/<int:pk>/knn-justified/monthly/", KnnJustifiedMonthlyView.as_view()),
 ]
 
     
