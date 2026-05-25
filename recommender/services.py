@@ -265,29 +265,7 @@ DENSITY_G_PER_ML = {
 def get_nutritional_content_in_json(formatted_intakes):
     if formatted_intakes is None:
         return {"calories_kcal": 0, "protein_g": 0, "fats_g": 0, "carbohydrates_g": 0, "fiber_g": 0}
-
-    totals = {"calories_kcal": 0.0, "protein_g": 0.0, "fats_g": 0.0, "carbohydrates_g": 0.0, "fiber_g": 0.0}
-
-    # Parse "X ml of food_class" entries from the formatted string
-    matches = re.findall(r'([\d.]+)\s*ml\s*of\s*(\w+)', formatted_intakes.lower())
-
-    unknown_items = []
-    for volume_str, food_class in matches:
-        volume_ml = float(volume_str)
-        if food_class in NUTRITION_PER_100G:
-            mass_g = volume_ml * DENSITY_G_PER_ML.get(food_class, 1.0)
-            for nutrient, per_100g in NUTRITION_PER_100G[food_class].items():
-                totals[nutrient] += (mass_g / 100.0) * per_100g
-        else:
-            unknown_items.append(f"{volume_str} ml of {food_class}")
-
-    # Fallback: LLM estimation for food classes not in the reference table
-    if unknown_items:
-        llm_result = _get_nutrition_from_llm(", ".join(unknown_items))
-        for nutrient in totals:
-            totals[nutrient] += llm_result.get(nutrient, 0)
-
-    return {k: round(v, 2) for k, v in totals.items()}
+    return _get_nutrition_from_llm(formatted_intakes)
 
 
 def _get_nutrition_from_llm(formatted_intakes):

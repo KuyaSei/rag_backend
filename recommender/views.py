@@ -1632,15 +1632,7 @@ KNN_API_BASE = "https://q30gkzkn-8000.devtunnels.ms"
 
 
 class KnnJustifiedRecommendationView(APIView):
-    """
-    Daily nutrition table (same as DailyRecommendationsByPatientAndDateView) +
-    KNN-selected meals from Alex's API + HPA Dietary Guidelines paragraph from LLM.
 
-    GET /api/recommend/nutri-and-food/patient/<pk>/knn-justified/
-        ?period=day|week|month  (default: day, forwarded to Alex's KNN API)
-        &date=YYYY-MM-DD        (optional, defaults to today — used for nutrition table)
-        &top_n=<int>            (optional, forwarded to Alex's KNN API)
-    """
     def get(self, request, pk):
         try:
             period  = request.GET.get('period', 'day')
@@ -1693,7 +1685,7 @@ class KnnJustifiedRecommendationView(APIView):
                 n: get_nutrition_remarks(patient_dris, total_nutri, nutrient=n) for n in nutrients
             }
 
-            # 3. Call Alex's KNN endpoint
+            # 3. Call KNN endpoint
             knn_url = f"{KNN_API_BASE}/api/meals/recommendations/"
             params  = {"ltc_patient_id": pk, "period": period}
             if top_n:
@@ -1835,14 +1827,7 @@ Rules:
 
 
 class KnnJustifiedWeeklyView(APIView):
-    """
-    7-day nutrition table (same as WeeklyRecommendationsByPatientView) +
-    KNN-selected meals from Alex's API (period=week) + HPA Dietary Guidelines from LLM.
-
-    GET /api/recommend/nutri-and-food/patient/<pk>/knn-justified/weekly/
-        ?date=YYYY-MM-DD  (optional, end date — defaults to today)
-        &top_n=<int>      (optional, forwarded to KNN API)
-    """
+   
     def get(self, request, pk):
         try:
             top_n = request.GET.get('top_n')
@@ -1903,7 +1888,7 @@ class KnnJustifiedWeeklyView(APIView):
                 for n in weekly_total_nutri_content
             }
 
-            # 3. Call Alex's KNN endpoint (period=week)
+            # 3. Call KNN endpoint (period=week)
             knn_url = f"{KNN_API_BASE}/api/meals/recommendations/"
             params  = {"ltc_patient_id": pk, "period": "week"}
             if top_n:
@@ -2022,14 +2007,7 @@ Rules:
 
 
 class KnnJustifiedMonthlyView(APIView):
-    """
-    28-day nutrition table (same as MonthlyRecommendationsByPatientView) +
-    KNN-selected meals from Alex's API (period=month) + HPA Dietary Guidelines from LLM.
-
-    GET /api/recommend/nutri-and-food/patient/<pk>/knn-justified/monthly/
-        ?date=YYYY-MM-DD  (optional, end date — defaults to today)
-        &top_n=<int>      (optional, forwarded to KNN API)
-    """
+ 
     def get(self, request, pk):
         try:
             top_n = request.GET.get('top_n')
@@ -2107,7 +2085,6 @@ class KnnJustifiedMonthlyView(APIView):
                 for n in monthly_total_nutri_content
             }
 
-            # 3. Call Alex's KNN endpoint (period=month)
             knn_url = f"{KNN_API_BASE}/api/meals/recommendations/"
             params  = {"ltc_patient_id": pk, "period": "month"}
             if top_n:

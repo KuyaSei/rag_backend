@@ -58,7 +58,7 @@ urlpatterns = [
     path("nutri-and-food/patient/<int:pk>/macro-summary", PatientMacroSummaryView.as_view()),
     path("nutri-and-food/patient/<int:pk>/macro-summary/", PatientMacroSummaryView.as_view()),
 
-    # KNN (Alex) + LLM clinical justification — calls Alex's KNN then layers HPA RAG on top
+    # KNN) + LLM clinical justification — calls KNN then layers HPA RAG on top
     path("nutri-and-food/patient/<int:pk>/knn-justified", KnnJustifiedRecommendationView.as_view()),
     path("nutri-and-food/patient/<int:pk>/knn-justified/", KnnJustifiedRecommendationView.as_view()),
 
